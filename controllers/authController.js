@@ -4,33 +4,15 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
-const { Storage } = require('@google-cloud/storage');
 const path = require('path');
 
-const gcs = new Storage({
-  projectId: 'reattendance',
-  keyFilename: path.join(__dirname, '../config/gcs-key.json') 
-});
-const bucketName = 'reattendance-profile-images'; 
-const bucket = gcs.bucket(bucketName);
 
 const getSignedUrl = async (profileImageUrl) => {
   if (!profileImageUrl) {
     return null;
   }
-  try {
-    const fileName = profileImageUrl.split('/').pop();
-    const options = {
-      version: 'v4',
-      action: 'read',
-      expires: Date.now() + 15 * 60 * 1000, // 15 minutes
-    };
-    const [url] = await bucket.file(fileName).getSignedUrl(options);
-    return url;
-  } catch (err) {
-    console.error("Error generating signed URL:", err);
-    return null; 
-  }
+
+  return profileImageUrl;
 };
 
 exports.login = async (req, res) => {
@@ -84,7 +66,7 @@ const sendTokenResponse = async (user, statusCode, res) => {
     expiresIn: '30d',
   });
 
-  const signedProfileUrl = await getSignedUrl(user.profileImageUrl);
+  const signedProfileUrl = user.profileImageUrl;
 
   res.status(statusCode).json({
     success: true,

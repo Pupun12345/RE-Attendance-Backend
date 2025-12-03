@@ -11,29 +11,26 @@ const {
   markWorkerAttendance
 } = require('../controllers/attendanceController');
 const { protect, authorize } = require('../middleware/auth');
-
-// Import upload middleware
 const { uploadAttendanceImage, uploadToGCS } = require('../middleware/upload');
 
 const router = express.Router();
 
-// All routes below are protected
 router.use(protect);
 
-// --- Routes for Admin/Management ---
-router.get('/summary/today', authorize('admin', 'management'), getTodaySummary);
+// ✅ FIXED: All roles (Admin, Management, Supervisor) can view the summary
+router.get('/summary/today', authorize('admin', 'management', 'supervisor'), getTodaySummary);
+
+// --- Admin/Management Only ---
 router.get('/pending', authorize('admin', 'management'), getPendingAttendance);
 router.put('/:id/approve', authorize('admin', 'management'), approveAttendance);
 router.put('/:id/reject', authorize('admin', 'management'), rejectAttendance);
 
-// --- Routes for Supervisor ---
+// --- Supervisor Only ---
 router.get('/status/today', authorize('supervisor'), getDailyStatusReport);
 router.post('/mark', authorize('supervisor'), markWorkerAttendance);
 
-// --- Routes for Supervisor/Management (Self-Attendance) ---
-// We apply upload middleware only to the routes that need it.
+// --- Self Attendance ---
 router.post('/checkin', authorize('supervisor', 'management'), uploadAttendanceImage, uploadToGCS, selfCheckIn);
 router.post('/checkout', authorize('supervisor', 'management'), uploadAttendanceImage, uploadToGCS, selfCheckOut);
-
 
 module.exports = router;

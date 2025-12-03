@@ -2,17 +2,23 @@
 const { Storage } = require('@google-cloud/storage');
 const multer = require('multer');
 const path = require('path');
+const {configDotenv} = require ('dotenv')
+configDotenv()
 
 // --- 1. Configuration ---
 
 // Initialize GCS Storage
 const gcs = new Storage({
-  projectId: 'reattendance', // <-- Make sure this is replaced
-  keyFilename: path.join(__dirname, '../config/gcs-key.json') 
+  projectId: process.env.GCP_PROJECT_ID,
+  credentials: {
+    client_email: process.env.GCP_CLIENT_EMAIL,
+    private_key: process.env.GCP_PRIVATE_KEY,
+  },
+
 });
 
 // Your bucket name
-const bucketName = 'reattendance-profile-images'; // <-- Corrected bucket name
+const bucketName = 'ray-engineering-attendance-image'; // <-- Corrected bucket name
 const bucket = gcs.bucket(bucketName);
 
 // Configure Multer to use memory storage
@@ -40,43 +46,30 @@ const upload = multer({
 // --- 2. Custom Middleware to Upload to GCS ---
 
 // This middleware runs *after* multer processes the file
-const uploadToGCS = (req, res, next) => {
-  // If no file was uploaded, skip to the controller
-  if (!req.file) {
-    return next();
-  }
+const uploadToGCS = async (req, res, next) => {
+  if (!req.file) return next();
 
-  // Create a unique filename for GCS
   const fileName = `complaint_${req.user.id}_${Date.now()}${path.extname(req.file.originalname)}`;
-  
-  // Create a "blob" (file object) in GCS
-  const blob = bucket.file(fileName);
+  const file = bucket.file(fileName);
 
-  // Create a stream to write the file to GCS
-  const blobStream = blob.createWriteStream({
-    resumable: false,
-    gzip: true,
-  });
+  try {
+    await file.save(req.file.buffer, {
+      metadata: {
+        contentType: req.file.mimetype,
+      },
+      resumable: false,
+      // public: true,
+    });
 
-  blobStream.on('error', (err) => {
-    console.error("GCS Upload Error:", err); 
-    return next(err);
-  });
-
-  blobStream.on('finish', () => {
-    // 1. Get the public URL
-    const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
-
-    // 2. Attach the URL to req.file.path
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
     req.file.path = publicUrl;
-
-    // 3. Continue to the next middleware
     next();
-  });
-
-  // End the stream by writing the file's buffer
-  blobStream.end(req.file.buffer);
+  } catch (error) {
+    console.error('GCS Upload Error:', error);
+    next(error);
+  }
 };
+
 
 // --- 3. Export the Middlewares ---
 module.exports = {

@@ -7,25 +7,30 @@ const {
   updateUser,
   deleteUser
 } = require('../controllers/userController');
-// ✅ 1. Import our new middleware object
 const { uploadImage, uploadToGCS } = require('../middleware/upload');
 const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
-// All routes below are protected
+// All routes below are protected (User must be logged in)
 router.use(protect);
-// All routes below are only for admin/management
-router.use(authorize('admin', 'management'));
+
+// --- Routes ---
 
 router.route('/')
-  // ✅ 2. Use the two middlewares in order
-  .post(uploadImage, uploadToGCS, createUser) 
-  .get(getUsers);
+  // ✅ 1. Allow 'supervisor' to GET (view) the user list
+  // - Fixed restriction here
+  .get(authorize('admin', 'management', 'supervisor'), getUsers)
+  
+  // 🔒 2. Keep POST (create) restricted to Admin/Management
+  .post(authorize('admin', 'management'), uploadImage, uploadToGCS, createUser);
 
 router.route('/:id')
-  .get(getUser)
-  .put(updateUser)
-  .delete(deleteUser);
+  // ✅ 3. Allow 'supervisor' to GET (view) single user details
+  .get(authorize('admin', 'management', 'supervisor'), getUser)
+  
+  // 🔒 4. Keep PUT (update) and DELETE restricted to Admin/Management
+  .put(authorize('admin', 'management'), updateUser)
+  .delete(authorize('admin', 'management'), deleteUser);
 
 module.exports = router;

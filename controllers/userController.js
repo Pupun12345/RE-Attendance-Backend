@@ -1,14 +1,14 @@
 // controllers/userController.js
 const User = require('../models/User');
-const { Storage } = require('@google-cloud/storage'); // ✅ 1. Import GCS
+const { Storage } = require('@google-cloud/storage');
 const path = require('path');
 
-// ✅ 2. Initialize GCS (same as in middleware/upload.js)
+// Initialize GCS
 const gcs = new Storage({
-  projectId: 'YOUR-GCP-PROJECT-ID', // <-- Replace with your Project ID
+  projectId: process.env.GCP_PROJECT_ID, // Use env var for safety
   keyFilename: path.join(__dirname, '../config/gcs-key.json') 
 });
-const bucketName = 'reattendance-profile-images'; // <-- Your bucket name
+const bucketName = 'reattendance-profile-images';
 const bucket = gcs.bucket(bucketName);
 
 // --- Helper function to generate a Signed URL ---
@@ -16,38 +16,39 @@ const getSignedUrl = async (profileImageUrl) => {
   if (!profileImageUrl) {
     return null;
   }
+  // If it's already a full URL (public), just return it
+  if (profileImageUrl.startsWith('http')) {
+      return profileImageUrl;
+  }
   
   try {
-    // Get the filename from the full URL
     const fileName = profileImageUrl.split('/').pop();
-    
     const options = {
       version: 'v4',
       action: 'read',
       expires: Date.now() + 15 * 60 * 1000, // 15 minutes
     };
-
-    // Get a v4 signed URL for reading the file
     const [url] = await bucket.file(fileName).getSignedUrl(options);
     return url;
-
   } catch (err) {
     console.error("Error generating signed URL:", err);
-    return null; // Return null if GCS fails
+    return null;
   }
 };
-// --- End Helper ---
-
 
 exports.createUser = async (req, res) => {
   const { name, userId, phone, email, password, role } = req.body;
   
   try {
     let profileImageUrl = null;
+    
+    // ✅ CHECK IF FILE EXISTS BEFORE ACCESSING .path
     if (req.file) {
-      // req.file.path is the public URL from GCS middleware
       profileImageUrl = req.file.path; 
+      console.log("File uploaded:", req.file.path); // Moved inside the check
     }
+
+    // ❌ REMOVED THE CRASHING LINE: console.log(req.file.path)
 
     let user = await User.create({
       name,
@@ -59,13 +60,12 @@ exports.createUser = async (req, res) => {
       profileImageUrl 
     });
 
-    // ✅ 3. Convert to a plain object to send back
     let userResponse = user.toObject();
     
-    // ✅ 4. Generate a new signed URL for the response
+    // Generate URL for response
     userResponse.profileImageUrl = await getSignedUrl(user.profileImageUrl);
 
-    res.status(201).json({ success: true, user: userResponse }); // Send the modified object
+    res.status(201).json({ success: true, user: userResponse });
 
   } catch (err) {
     console.error(err);
@@ -76,9 +76,7 @@ exports.createUser = async (req, res) => {
   }
 };
 
-
-// @desc    Get all users (with filter)
-// @route   GET /api/v1/users
+// @desc    Get all users
 exports.getUsers = async (req, res) => {
   let query = {};
   if (req.query.role) {
@@ -87,9 +85,8 @@ exports.getUsers = async (req, res) => {
   query.isActive = true; 
   
   try {
-    const users = await User.find(query).select('-password').lean(); // ✅ Use .lean() to get plain objects
+    const users = await User.find(query).select('-password').lean();
 
-    // ✅ 5. Loop and generate signed URLs for all users
     for (let user of users) {
       user.profileImageUrl = await getSignedUrl(user.profileImageUrl);
     }
@@ -103,16 +100,14 @@ exports.getUsers = async (req, res) => {
 };
 
 // @desc    Get single user
-// @route   GET /api/v1/users/:id
 exports.getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password').lean(); // ✅ Use .lean()
+    const user = await User.findById(req.params.id).select('-password').lean();
     
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // ✅ 6. Generate signed URL for the single user
     user.profileImageUrl = await getSignedUrl(user.profileImageUrl);
 
     res.status(200).json({ success: true, user });
@@ -123,22 +118,19 @@ exports.getUser = async (req, res) => {
 };
 
 // @desc    Update user
-// @route   PUT /api/v1/users/:id
 exports.updateUser = async (req, res) => {
   try {
-    // Exclude password from body, it should be updated via a separate route
     const { password, ...body } = req.body;
     
     const user = await User.findByIdAndUpdate(req.params.id, body, {
       new: true,
       runValidators: true,
-    }).lean(); // ✅ Use .lean()
+    }).lean();
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // ✅ 7. Generate signed URL for the updated user
     user.profileImageUrl = await getSignedUrl(user.profileImageUrl);
     
     res.status(200).json({ success: true, user });
@@ -147,8 +139,7 @@ exports.updateUser = async (req, res) => {
   }
 };
 
-// @desc    Delete user (set inactive)
-// @route   DELETE /api/v1/users/:id
+// @desc    Delete user
 exports.deleteUser = async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(req.params.id, { isActive: false });

@@ -2,6 +2,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
+const morgan = require('morgan')
 const connectDB = require('./config/db');
 
 // Load env vars
@@ -28,6 +29,9 @@ app.use(cors());
 // Body parser
 app.use(express.json());
 
+
+app.use(morgan('dev'));
+
 // Mount routers
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', usersRoutes);
@@ -44,6 +48,8 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
+
+
 
 app.listen(
   PORT,

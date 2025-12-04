@@ -5,7 +5,7 @@ const { RekognitionClient, CompareFacesCommand } = require("@aws-sdk/client-reko
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
 
-// --- 1. INITIALIZE AWS REKOGNITION (Optional use) ---
+// --- 1. INITIALIZE AWS REKOGNITION ---
 const rekognition = new RekognitionClient({
   region: process.env.AWS_REGION || 'us-east-1',
   credentials: {
@@ -14,17 +14,20 @@ const rekognition = new RekognitionClient({
   },
 });
 
-// --- 2. INITIALIZE GCS ---
+// --- 2. INITIALIZE GOOGLE CLOUD STORAGE ---
 const gcs = new Storage({
   projectId: process.env.GCP_PROJECT_ID,
   keyFilename: path.join(__dirname, '../config/gcs-key.json') 
 });
-const bucketName = 'ray-engineering-attendance-image'; // Ensure this matches middleware
+
+// Ensure this matches your middleware/upload.js bucket name
+const bucketName = 'ray-engineering-attendance-image'; 
 const bucket = gcs.bucket(bucketName);
 
-// --- Helper: Download Image from GCS ---
+// --- 3. HELPER: Download Image from GCS ---
 async function getImageBuffer(imageUrl) {
   try {
+    // Extract filename from URL (e.g., https://storage.googleapis.com/.../filename.jpg)
     const fileName = imageUrl.split('/').pop(); 
     const [buffer] = await bucket.file(fileName).download();
     return buffer;
@@ -34,7 +37,7 @@ async function getImageBuffer(imageUrl) {
   }
 }
 
-// --- Helper: Compare Faces ---
+// --- 4. HELPER: Compare Faces (AWS Rekognition) ---
 async function verifyFace(sourceImageUrl, targetImageUrl) {
   try {
     const sourceBuffer = await getImageBuffer(sourceImageUrl);
@@ -47,16 +50,145 @@ async function verifyFace(sourceImageUrl, targetImageUrl) {
     });
 
     const response = await rekognition.send(command);
-    return response.FaceMatches && response.FaceMatches.length > 0;
+    
+    // Check if we have a match
+    if (response.FaceMatches && response.FaceMatches.length > 0) {
+       const match = response.FaceMatches[0];
+       console.log(`✅ Face Match! Similarity: ${match.Similarity.toFixed(2)}%`);
+       return true;
+    }
+    
+    console.log(`❌ No Face Match Found.`);
+    return false;
+
   } catch (error) {
     console.error("AWS Rekognition Error:", error);
-    // Return false instead of crashing if face detection fails
+    // Return false instead of crashing
     return false;
   }
 }
 
 // ==========================================
-// ✅ NEW: SUPERVISOR CHECK-IN FOR WORKER
+// 1. SELF CHECK-IN (With Face Verify)
+// ==========================================
+exports.selfCheckIn = async (req, res) => {
+  const { location } = req.body;
+  
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'Selfie is required' });
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    
+    // 🔒 FACE VERIFICATION STEP
+    if (user.profileImageUrl) {
+       const isMatch = await verifyFace(user.profileImageUrl, req.file.path);
+       if (!isMatch) {
+         return res.status(400).json({ 
+           success: false, 
+           message: 'Face verification failed. You are not the registered user.' 
+         });
+       }
+    } else {
+        return res.status(400).json({ success: false, message: 'No reference photo found. Please contact admin.' });
+    }
+
+    let record = await Attendance.findOne({
+      user: req.user.id,
+      date: { $gte: today, $lt: tomorrow }
+    });
+
+    if (record) {
+      if (record.status === 'present') {
+        return res.status(400).json({ success: false, message: 'Already checked in today.' });
+      }
+      // Update existing record (e.g. if previous status was 'absent' or 'leave')
+      record.status = 'present';
+      record.checkInTime = new Date();
+      record.checkInLocation = location;
+      record.checkInSelfie = req.file.path;
+      record.notes = 'Self check-in (Verified)';
+      await record.save();
+      res.status(200).json({ success: true, data: record });
+    } else {
+      // Create new record
+      record = await Attendance.create({
+        user: req.user.id,
+        date: today,
+        status: 'present',
+        checkInTime: new Date(),
+        checkInLocation: location,
+        checkInSelfie: req.file.path,
+        notes: 'Self check-in (Verified)'
+      });
+      res.status(201).json({ success: true, data: record });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
+
+// ==========================================
+// 2. SELF CHECK-OUT (With Face Verify)
+// ==========================================
+exports.selfCheckOut = async (req, res) => {
+  const { location } = req.body;
+  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  try {
+    const user = await User.findById(req.user.id);
+    
+    // 🔒 FACE VERIFICATION STEP
+    if (user && user.profileImageUrl) {
+        const isMatch = await verifyFace(user.profileImageUrl, req.file.path);
+        if (!isMatch) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Face verification failed. Check-out denied.' 
+            });
+        }
+    }
+
+    let record = await Attendance.findOne({
+      user: req.user.id,
+      date: { $gte: today, $lt: tomorrow }
+    });
+
+    if (!record || record.status !== 'present') {
+      return res.status(400).json({ success: false, message: 'You have not checked in today.' });
+    }
+    if (record.checkOutTime) {
+      return res.status(400).json({ success: false, message: 'Already checked out.' });
+    }
+
+    record.checkOutTime = new Date();
+    record.checkOutLocation = location;
+    record.checkOutSelfie = req.file.path;
+    await record.save();
+    
+    res.status(200).json({ success: true, data: record });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
+
+// ==========================================
+// 3. SUPERVISOR CHECK-IN FOR WORKER
 // ==========================================
 exports.supervisorCheckInWorker = async (req, res) => {
   const { workerId, location } = req.body;
@@ -70,11 +202,12 @@ exports.supervisorCheckInWorker = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // 1. Verify Worker Exists
+    // Note: We skip face verification for Supervisor override, 
+    // assuming the Supervisor has visually verified the worker.
+    
     const worker = await User.findById(workerId);
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
 
-    // 2. Check for existing attendance
     let record = await Attendance.findOne({
       user: workerId,
       date: { $gte: today, $lt: tomorrow }
@@ -84,17 +217,15 @@ exports.supervisorCheckInWorker = async (req, res) => {
       if (record.status === 'present') {
         return res.status(400).json({ success: false, message: 'Worker already checked in today.' });
       }
-      // If status was absent/leave, update it
       record.status = 'present';
       record.checkInTime = new Date();
       record.checkInLocation = location;
-      record.checkInSelfie = req.file.path; // GCS URL
+      record.checkInSelfie = req.file.path;
       record.notes = `Punch In by Supervisor: ${req.user.name}`;
       await record.save();
       return res.status(200).json({ success: true, data: record });
     }
 
-    // 3. Create new record
     record = await Attendance.create({
       user: workerId,
       date: today,
@@ -114,7 +245,7 @@ exports.supervisorCheckInWorker = async (req, res) => {
 };
 
 // ==========================================
-// ✅ NEW: SUPERVISOR CHECK-OUT FOR WORKER
+// 4. SUPERVISOR CHECK-OUT FOR WORKER
 // ==========================================
 exports.supervisorCheckOutWorker = async (req, res) => {
   const { workerId, location } = req.body;
@@ -128,7 +259,6 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // 1. Find today's record
     let record = await Attendance.findOne({
       user: workerId,
       date: { $gte: today, $lt: tomorrow }
@@ -141,12 +271,10 @@ exports.supervisorCheckOutWorker = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Worker already checked out.' });
     }
 
-    // 2. Update record
     record.checkOutTime = new Date();
     record.checkOutLocation = location;
     record.checkOutSelfie = req.file.path;
     
-    // Append to notes
     const note = `Punch Out by Supervisor: ${req.user.name}`;
     record.notes = record.notes ? `${record.notes} | ${note}` : note;
     
@@ -159,89 +287,9 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   }
 };
 
-// --- EXISTING CONTROLLERS (Unchanged logic) ---
-
-exports.selfCheckIn = async (req, res) => {
-  const { location } = req.body;
-  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
-    // Simple face verify if profile image exists
-    if (user.profileImageUrl) {
-       // const isMatch = await verifyFace(user.profileImageUrl, req.file.path);
-       // if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
-    }
-
-    let record = await Attendance.findOne({
-      user: req.user.id,
-      date: { $gte: today, $lt: tomorrow }
-    });
-
-    if (record) {
-      if (record.status === 'present') return res.status(400).json({ success: false, message: 'Already checked in today.' });
-      record.status = 'present';
-      record.checkInTime = new Date();
-      record.checkInLocation = location;
-      record.checkInSelfie = req.file.path;
-      record.notes = 'Self check-in';
-      await record.save();
-      res.status(200).json({ success: true, data: record });
-    } else {
-      record = await Attendance.create({
-        user: req.user.id,
-        date: today,
-        status: 'present',
-        checkInTime: new Date(),
-        checkInLocation: location,
-        checkInSelfie: req.file.path,
-        notes: 'Self check-in'
-      });
-      res.status(201).json({ success: true, data: record });
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server Error' });
-  }
-};
-
-exports.selfCheckOut = async (req, res) => {
-  const { location } = req.body;
-  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  try {
-    let record = await Attendance.findOne({
-      user: req.user.id,
-      date: { $gte: today, $lt: tomorrow }
-    });
-
-    if (!record || record.status !== 'present') return res.status(400).json({ success: false, message: 'You have not checked in today.' });
-    if (record.checkOutTime) return res.status(400).json({ success: false, message: 'Already checked out.' });
-
-    record.checkOutTime = new Date();
-    record.checkOutLocation = location;
-    record.checkOutSelfie = req.file.path;
-    await record.save();
-    
-    res.status(200).json({ success: true, data: record });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server Error' });
-  }
-};
+// ==========================================
+// 5. OTHER CONTROLLERS
+// ==========================================
 
 exports.getTodaySummary = async (req, res) => {
   try {

@@ -2,14 +2,7 @@
 const User = require('../models/User');
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
-
-// Initialize GCS
-const gcs = new Storage({
-  projectId: process.env.GCP_PROJECT_ID, // Use env var for safety
-  keyFilename: path.join(__dirname, '../config/gcs-key.json') 
-});
-const bucketName = 'reattendance-profile-images';
-const bucket = gcs.bucket(bucketName);
+const { bucket } = require('../config/initializeGCS');
 
 // --- Helper function to generate a Signed URL ---
 const getSignedUrl = async (profileImageUrl) => {

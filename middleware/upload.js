@@ -3,23 +3,14 @@ const { Storage } = require('@google-cloud/storage');
 const multer = require('multer');
 const path = require('path');
 const {configDotenv} = require ('dotenv')
+const { bucket } = require('../config/initializeGCS');
+
 configDotenv()
 
 // --- 1. Configuration ---
 
 // Initialize GCS Storage
-const gcs = new Storage({
-  projectId: process.env.GCP_PROJECT_ID,
-  credentials: {
-    client_email: process.env.GCP_CLIENT_EMAIL,
-    private_key: process.env.GCP_PRIVATE_KEY,
-  },
 
-});
-
-// Your bucket name
-const bucketName = 'ray-engineering-attendance-image'; // <-- Corrected bucket name
-const bucket = gcs.bucket(bucketName);
 
 // Configure Multer to use memory storage
 const multerStorage = multer.memoryStorage();

@@ -6,7 +6,7 @@ const { bucket } = require('../config/initializeGCS');
 
 const path = require('path');
 
-// --- 1. INITIALIZE AWS REKOGNITION (Optional use) ---
+// --- 1. INITIALIZE AWS REKOGNITION ---
 const rekognition = new RekognitionClient({
   region: process.env.AWS_REGION || 'us-east-1',
   credentials: {
@@ -16,7 +16,7 @@ const rekognition = new RekognitionClient({
 });
 
 
-// --- Helper: Download Image from GCS ---
+// --- 3. HELPER: Download Image from GCS ---
 async function getImageBuffer(imageUrl) {
   try {
     const fileName = imageUrl.split('/').pop();
@@ -28,7 +28,7 @@ async function getImageBuffer(imageUrl) {
   }
 }
 
-// --- Helper: Compare Faces ---
+// --- 4. HELPER: Compare Faces (AWS Rekognition) ---
 async function verifyFace(sourceImageUrl, targetImageUrl) {
   try {
     const sourceBuffer = await getImageBuffer(sourceImageUrl);
@@ -77,7 +77,6 @@ exports.supervisorCheckInWorker = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // 1. Verify Worker Exists
     const worker = await User.findById(workerId);
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
 
@@ -115,7 +114,6 @@ exports.supervisorCheckInWorker = async (req, res) => {
 
 
 
-    // 3. Create new record
     record = await Attendance.create({
       user: workerId,
       date: today,
@@ -130,12 +128,13 @@ exports.supervisorCheckInWorker = async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: 'Server Error during worker check-in' });
+    // Return explicit error to help with "Error Uploading Data" messages
+    res.status(500).json({ success: false, message: err.message || 'Server Error during worker check-in' });
   }
 };
 
 // ==========================================
-// ✅ NEW: SUPERVISOR CHECK-OUT FOR WORKER
+// 4. SUPERVISOR CHECK-OUT FOR WORKER
 // ==========================================
 exports.supervisorCheckOutWorker = async (req, res) => {
   const { workerId, location } = req.body;
@@ -149,7 +148,6 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // 1. Find today's record
     let record = await Attendance.findOne({
       user: workerId,
       date: { $gte: today, $lt: tomorrow },

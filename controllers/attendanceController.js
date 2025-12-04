@@ -188,7 +188,7 @@ exports.selfCheckOut = async (req, res) => {
 };
 
 // ==========================================
-// 3. SUPERVISOR CHECK-IN FOR WORKER
+// 3. SUPERVISOR CHECK-IN FOR WORKER (UPDATED)
 // ==========================================
 exports.supervisorCheckInWorker = async (req, res) => {
   const { workerId, location } = req.body;
@@ -202,11 +202,21 @@ exports.supervisorCheckInWorker = async (req, res) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
-    // Note: We skip face verification for Supervisor override, 
-    // assuming the Supervisor has visually verified the worker.
-    
     const worker = await User.findById(workerId);
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
+
+    // ✅ ADDED: FACE VERIFICATION FOR SUPERVISOR CHECK-IN
+    if (worker.profileImageUrl) {
+      const isMatch = await verifyFace(worker.profileImageUrl, req.file.path);
+      if (!isMatch) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Face verification failed. This does not match the worker profile.' 
+        });
+      }
+    } else {
+       return res.status(400).json({ success: false, message: 'Worker has no profile photo to verify against.' });
+    }
 
     let record = await Attendance.findOne({
       user: workerId,
@@ -240,7 +250,8 @@ exports.supervisorCheckInWorker = async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: 'Server Error during worker check-in' });
+    // Return explicit error to help with "Error Uploading Data" messages
+    res.status(500).json({ success: false, message: err.message || 'Server Error during worker check-in' });
   }
 };
 

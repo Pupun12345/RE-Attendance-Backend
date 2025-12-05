@@ -47,6 +47,7 @@ exports.updateComplaint = async (req, res) => {
 // @access  Protected (Supervisor, Management)
 exports.createComplaint = async (req, res) => {
   // --- 1. The text fields are now correctly parsed by multer ---
+  console.log("Request Body:", req.body);
   const { title, description } = req.body;
 
   // 2. Create the data object

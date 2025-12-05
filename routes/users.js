@@ -18,19 +18,20 @@ router.use(protect);
 // --- Routes ---
 
 router.route('/')
-  // ✅ 1. Allow 'supervisor' to GET (view) the user list
-  // - Fixed restriction here
+  // Allow 'supervisor' to GET (view) the user list
   .get(authorize('admin', 'management', 'supervisor'), getUsers)
   
-  // 🔒 2. Keep POST (create) restricted to Admin/Management
+  // Keep POST (create) restricted to Admin/Management
   .post(authorize('admin', 'management'), uploadImage, uploadToGCS, createUser);
 
 router.route('/:id')
-  // ✅ 3. Allow 'supervisor' to GET (view) single user details
+  // Allow 'supervisor' to GET (view) single user details
   .get(authorize('admin', 'management', 'supervisor'), getUser)
   
-  // 🔒 4. Keep PUT (update) and DELETE restricted to Admin/Management
-  .put(authorize('admin', 'management'), updateUser)
+  // UPDATE ROUTE: Added 'uploadImage' and 'uploadToGCS' here
+  .put(authorize('admin', 'management'), uploadImage, uploadToGCS, updateUser)
+  
+  // DELETE ROUTE
   .delete(authorize('admin', 'management'), deleteUser);
 
 module.exports = router;

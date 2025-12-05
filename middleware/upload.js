@@ -38,6 +38,8 @@ const upload = multer({
 
 // This middleware runs *after* multer processes the file
 const uploadToGCS = async (req, res, next) => {
+  console.log('uploadToGCS middleware triggered');
+  console.log('req.file:', req.file);
   if (!req.file) return next();
 
   const fileName = `complaint_${req.user.id}_${Date.now()}${path.extname(req.file.originalname)}`;
@@ -53,6 +55,7 @@ const uploadToGCS = async (req, res, next) => {
     });
 
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    console.log(`File uploaded to GCS: ${publicUrl}`);
     req.file.path = publicUrl;
     next();
   } catch (error) {

@@ -35,13 +35,10 @@ exports.createUser = async (req, res) => {
   try {
     let profileImageUrl = null;
     
-    // ✅ CHECK IF FILE EXISTS BEFORE ACCESSING .path
+    // CHECK IF FILE EXISTS BEFORE ACCESSING .path
     if (req.file) {
       profileImageUrl = req.file.path; 
-      console.log("File uploaded:", req.file.path); // Moved inside the check
     }
-
-    // ❌ REMOVED THE CRASHING LINE: console.log(req.file.path)
 
     let user = await User.create({
       name,
@@ -70,20 +67,28 @@ exports.createUser = async (req, res) => {
 };
 
 // @desc    Get all users
+// exports.getUsers = async (req, res) => {
 exports.getUsers = async (req, res) => {
   let query = {};
   if (req.query.role) {
     query.role = req.query.role;
   }
-  query.isActive = true; 
-  
+
+
+  const sortCriteria = { isActive: -1, name: 1 }; 
+
   try {
-    const users = await User.find(query).select('-password').lean();
+    // Apply the find query and the sort criteria
+    const users = await User.find(query)
+      .select('-password')
+      .sort(sortCriteria) // <--- ADDED SORT HERE
+      .lean();
 
     for (let user of users) {
+
       user.profileImageUrl = await getSignedUrl(user.profileImageUrl);
     }
-    
+
     res.status(200).json({ success: true, count: users.length, users });
 
   } catch (err) {
@@ -113,8 +118,15 @@ exports.getUser = async (req, res) => {
 // @desc    Update user
 exports.updateUser = async (req, res) => {
   try {
+    // 1. Separate password from body to prevent accidental password changes
     const { password, ...body } = req.body;
+
+    // 2. If a file was uploaded, add its path to the update object
+    if (req.file) {
+      body.profileImageUrl = req.file.path; 
+    }
     
+    // 3. Perform the update
     const user = await User.findByIdAndUpdate(req.params.id, body, {
       new: true,
       runValidators: true,
@@ -124,10 +136,12 @@ exports.updateUser = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // 4. Generate signed URL for response
     user.profileImageUrl = await getSignedUrl(user.profileImageUrl);
     
     res.status(200).json({ success: true, user });
   } catch (err) {
+    console.error("Update Error:", err);
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -135,11 +149,16 @@ exports.updateUser = async (req, res) => {
 // @desc    Delete user
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isActive: false });
+    const user = await User.findById(req.params.id);
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+
+    // if active then disable else enable
+    user.isActive = !user.isActive;
+    await user.save();
+    
     res.status(200).json({ success: true, message: 'User disabled' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server Error' });

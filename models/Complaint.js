@@ -2,10 +2,14 @@
 const mongoose = require('mongoose');
 
 const complaintSchema = new mongoose.Schema({
-  user: {
+  user: { // The WORKER (person who has the issue)
     type: mongoose.Schema.ObjectId,
     ref: 'User',
     required: true,
+  },
+  submittedBy: { //NEW: The SUPERVISOR (person who submitted it)
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
   },
   title: {
     type: String,
@@ -20,7 +24,6 @@ const complaintSchema = new mongoose.Schema({
     enum: ['pending', 'in_progress', 'resolved'],
     default: 'pending',
   },
-  // --- ADD THIS LINE ---
   imageUrl: {
     type: String,
   }

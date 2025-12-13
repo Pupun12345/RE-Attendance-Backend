@@ -19,7 +19,7 @@ const attendanceSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['present', 'absent', 'leave', 'pending', 'rejected'], // ✅ ADDED 'pending' and 'rejected'
+    enum: ['present', 'absent', 'leave', 'pending', 'rejected'], // ADDED 'pending' and 'rejected'
     default: 'absent',
   },
   notes: { // Optional: Good for users to add a reason for manual request

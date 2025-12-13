@@ -3,7 +3,6 @@ const Attendance = require('../models/Attendance');
 const User = require('../models/User');
 const { RekognitionClient, CompareFacesCommand } = require("@aws-sdk/client-rekognition");
 const { bucket } = require('../config/initializeGCS');
-
 const path = require('path');
 
 // --- 1. INITIALIZE AWS REKOGNITION ---
@@ -14,7 +13,6 @@ const rekognition = new RekognitionClient({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
-
 
 // --- 3. HELPER: Download Image from GCS ---
 async function getImageBuffer(imageUrl) {
@@ -59,14 +57,12 @@ async function verifyFace(sourceImageUrl, targetImageUrl) {
   }
 }
 
-
 // ==========================================
-// ✅ NEW: SUPERVISOR CHECK-IN FOR WORKER
+// 1. SUPERVISOR CHECK-IN FOR WORKER (Normal Network)
 // ==========================================
 exports.supervisorCheckInWorker = async (req, res) => {
   const { workerId, location } = req.body;
   console.log('Worker ID:', workerId);
-  console.log('Photo Path:', req.file.path);
 
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
   if (!req.file) return res.status(400).json({ success: false, message: 'Photo is required' });
@@ -80,39 +76,22 @@ exports.supervisorCheckInWorker = async (req, res) => {
     const worker = await User.findById(workerId);
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
 
-    // 2. Check for existing attendance
-    // let record = await Attendance.findOne({
-    //   user: workerId,
-    //   date: { $gte: today, $lt: tomorrow },
-    //   checkInTime: { $exists: true },
-
-    // });
-
-    // most recent record check with checkedin time
+    // Most recent record check
     let record = await Attendance.findOne({
       user: workerId,
       date: { $gte: today, $lt: tomorrow },
       checkInTime: { $exists: true },
     }).sort({ checkInTime: -1 });
 
-
-    console.log('Existing Record:', record);
-
-
     if (record) {
       if (record.status === 'present' && record.checkOutTime == null) {
         return res.status(400).json({ success: false, message: 'Worker already checked in today.' });
       }
     }
-    //face verification
 
+    // Face verification
     const isMatch = await verifyFace(worker.profileImageUrl, req.file.path);
-
-    console.log('Face Match Result:', isMatch);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
-
-
-
 
     record = await Attendance.create({
       user: workerId,
@@ -128,13 +107,12 @@ exports.supervisorCheckInWorker = async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    // Return explicit error to help with "Error Uploading Data" messages
     res.status(500).json({ success: false, message: err.message || 'Server Error during worker check-in' });
   }
 };
 
 // ==========================================
-// 4. SUPERVISOR CHECK-OUT FOR WORKER
+// 2. SUPERVISOR CHECK-OUT FOR WORKER (Normal Network)
 // ==========================================
 exports.supervisorCheckOutWorker = async (req, res) => {
   const { workerId, location } = req.body;
@@ -160,20 +138,17 @@ exports.supervisorCheckOutWorker = async (req, res) => {
     if (record.checkOutTime) {
       return res.status(400).json({ success: false, message: 'Worker already checked out.' });
     }
+    
     // Face verification
-
     const worker = await User.findById(workerId);
     const isMatch = await verifyFace(worker.profileImageUrl, req.file.path);
-    console.log('Face Match Result:', isMatch);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
 
-
-    // 2. Update record
+    // Update record
     record.checkOutTime = new Date();
     record.checkOutLocation = location;
     record.checkOutSelfie = req.file.path;
 
-    // Append to notes
     const note = `Punch Out by Supervisor: ${req.user.name}`;
     record.notes = record.notes ? `${record.notes} | ${note}` : note;
 
@@ -186,7 +161,245 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   }
 };
 
-// --- EXISTING CONTROLLERS (Unchanged logic) ---
+// ==========================================
+// 3. SUPERVISOR PENDING SYNC: CHECK-IN (3rd API - Offline Sync)
+// ==========================================
+exports.supervisorCreatePendingCheckIn = async (req, res) => {
+  const { workerId, location, dateTime } = req.body;
+
+  if (!workerId || !req.file) {
+    return res.status(400).json({ success: false, message: 'Worker ID and Photo are required' });
+  }
+
+  try {
+    // Use the timestamp passed from the app (when photo was taken offline)
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    const record = await Attendance.create({
+      user: workerId,
+      date: attendanceDate,
+      status: 'pending', // IMPORTANT: Goes to Admin Pending Queue
+      checkInTime: attendanceDate,
+      checkInLocation: location,
+      checkInSelfie: req.file.path, 
+      notes: `Offline Sync by Supervisor: ${req.user.name}`
+    });
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Pending Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+// ==========================================
+// 4. SUPERVISOR PENDING SYNC: CHECK-OUT (3rd API - Offline Sync)
+// ==========================================
+exports.supervisorCreatePendingCheckOut = async (req, res) => {
+  const { workerId, location, dateTime } = req.body;
+
+  if (!workerId || !req.file) {
+    return res.status(400).json({ success: false, message: 'Worker ID and Photo are required' });
+  }
+
+  try {
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    const startOfDay = new Date(attendanceDate);
+    startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(attendanceDate);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+
+    // Try to find existing record for that day
+    let record = await Attendance.findOne({
+      user: workerId,
+      date: { $gte: startOfDay, $lt: endOfDay }
+    });
+
+    if (record) {
+      // Existing record update, set status to pending for approval
+      record.checkOutTime = attendanceDate;
+      record.checkOutLocation = location;
+      record.checkOutSelfie = req.file.path;
+      record.status = 'pending'; 
+      record.notes = (record.notes || "") + ` | Offline Out Sync by ${req.user.name}`;
+      await record.save();
+    } else {
+      // No check-in found (maybe check-in was also offline and not synced yet?)
+      record = await Attendance.create({
+        user: workerId,
+        date: attendanceDate,
+        status: 'pending',
+        checkOutTime: attendanceDate,
+        checkOutLocation: location,
+        checkOutSelfie: req.file.path,
+        notes: `Offline Out (No CheckIn Found) by Supervisor: ${req.user.name}`
+      });
+    }
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Pending Out Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+// controllers/attendanceController.js
+
+// ... (Existing imports and functions) ...
+
+// 5. SELF ATTENDANCE: OFFLINE SYNC (PENDING)
+// This saves the record as 'pending' so Admin must approve it.
+exports.selfCreatePendingCheckIn = async (req, res) => {
+  const { location, dateTime } = req.body;
+  
+  // Note: For self-attendance, req.user.id comes from the token
+  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
+
+  try {
+    // Use the time provided by the app (when the photo was actually taken)
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    const record = await Attendance.create({
+      user: req.user.id, 
+      date: attendanceDate,
+      status: 'pending', // <--- Goes to Admin Queue
+      checkInTime: attendanceDate,
+      checkInLocation: location,
+      checkInSelfie: req.file.path, 
+      notes: `Offline Self-Sync: ${req.user.name}`
+    });
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Self Pending Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+// 6. SELF ATTENDANCE: OFFLINE CHECK-OUT SYNC (PENDING)
+exports.selfCreatePendingCheckOut = async (req, res) => {
+  const { location, dateTime } = req.body;
+  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
+
+  try {
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    // Find today's record
+    const startOfDay = new Date(attendanceDate);
+    startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(attendanceDate);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+
+    let record = await Attendance.findOne({
+      user: req.user.id,
+      date: { $gte: startOfDay, $lt: endOfDay }
+    });
+
+    if (record) {
+      record.checkOutTime = attendanceDate;
+      record.checkOutLocation = location;
+      record.checkOutSelfie = req.file.path;
+      record.status = 'pending'; // Set to pending for Admin review
+      record.notes = (record.notes || "") + ` | Offline Self-Out Sync`;
+      await record.save();
+    } else {
+      // Create new if no check-in found
+      record = await Attendance.create({
+        user: req.user.id,
+        date: attendanceDate,
+        status: 'pending',
+        checkOutTime: attendanceDate,
+        checkOutLocation: location,
+        checkOutSelfie: req.file.path,
+        notes: `Offline Self-Out (No CheckIn found)`
+      });
+    }
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Self Pending Out Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+
+// 5. SELF ATTENDANCE: OFFLINE SYNC (PENDING)
+// This saves the record as 'pending' so Admin must approve it.
+exports.selfCreatePendingCheckIn = async (req, res) => {
+  const { location, dateTime } = req.body;
+  
+  // Note: For self-attendance, req.user.id comes from the token
+  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
+
+  try {
+    // Use the time provided by the app (when the photo was actually taken)
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    const record = await Attendance.create({
+      user: req.user.id, 
+      date: attendanceDate,
+      status: 'pending', // <--- Goes to Admin Queue
+      checkInTime: attendanceDate,
+      checkInLocation: location,
+      checkInSelfie: req.file.path, 
+      notes: `Offline Self-Sync: ${req.user.name}`
+    });
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Self Pending Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+// 6. SELF ATTENDANCE: OFFLINE CHECK-OUT SYNC (PENDING)
+exports.selfCreatePendingCheckOut = async (req, res) => {
+  const { location, dateTime } = req.body;
+  if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
+
+  try {
+    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    
+    // Find today's record
+    const startOfDay = new Date(attendanceDate);
+    startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(attendanceDate);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+
+    let record = await Attendance.findOne({
+      user: req.user.id,
+      date: { $gte: startOfDay, $lt: endOfDay }
+    });
+
+    if (record) {
+      record.checkOutTime = attendanceDate;
+      record.checkOutLocation = location;
+      record.checkOutSelfie = req.file.path;
+      record.status = 'pending'; // Set to pending for Admin review
+      record.notes = (record.notes || "") + ` | Offline Self-Out Sync`;
+      await record.save();
+    } else {
+      // Create new if no check-in found
+      record = await Attendance.create({
+        user: req.user.id,
+        date: attendanceDate,
+        status: 'pending',
+        checkOutTime: attendanceDate,
+        checkOutLocation: location,
+        checkOutSelfie: req.file.path,
+        notes: `Offline Self-Out (No CheckIn found)`
+      });
+    }
+
+    res.status(201).json({ success: true, data: record });
+  } catch (err) {
+    console.error("Self Pending Out Sync Error:", err);
+    res.status(500).json({ success: false, message: 'Server Error saving pending record' });
+  }
+};
+
+// --- EXISTING CONTROLLERS ---
 
 exports.selfCheckIn = async (req, res) => {
   const { location } = req.body;
@@ -207,21 +420,14 @@ exports.selfCheckIn = async (req, res) => {
       checkInTime: { $exists: true }
     }).sort({ checkInTime: -1 });
 
-    // Simple face verify if profile image exists
-
-
-
-
     if (record) {
       if (record.status === 'present' && record.checkOutTime == null) return res.status(400).json({ success: false, message: 'Already checked in today.' });
-
     }
 
     if (user.profileImageUrl) {
       const isMatch = await verifyFace(user.profileImageUrl, req.file.path);
       if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
     }
-
 
     record = await Attendance.create({
       user: req.user.id,
@@ -288,8 +494,6 @@ exports.getTodaySummary = async (req, res) => {
 
     const presentStats = await Attendance.aggregate([
       { $match: { date: { $gte: today, $lt: tomorrow } } },
-
-      // unique users only
       {
         $group: {
           _id: '$user',
@@ -302,13 +506,11 @@ exports.getTodaySummary = async (req, res) => {
       role: { $in: ['worker'] },
       isActive: true,
       _id: { $nin: presentStats.map(stat => stat._id) }
-
     });
 
     const leaveCount = await Attendance.countDocuments({
       date: { $gte: today, $lt: tomorrow },
       status: 'leave',
-
     });
 
     const rejectedCount = await Attendance.countDocuments({
@@ -321,12 +523,7 @@ exports.getTodaySummary = async (req, res) => {
       status: 'pending',
     });
 
-
-
-    console.log(presentStats.length, absentCount);
-
     const summary = { present: presentStats.length, absent: absentCount, leave: leaveCount, pending: pendingCount, rejected: rejectedCount };
-
 
     const totalStaff = await User.countDocuments({
       role: { $in: ['worker', 'supervisor', 'management'] },

@@ -68,7 +68,6 @@ const uploadToGCS = async (req, res, next) => {
 // --- 3. Export the Middlewares ---
 module.exports = {
   uploadImage: upload.single('profileImage'), // For user profiles
-  // --- ADD THIS LINE ---
   uploadComplaintImage: upload.single('complaintImage'), // For complaints
   uploadAttendanceImage: upload.single('attendanceImage'),
   uploadToGCS: uploadToGCS,

@@ -11,41 +11,52 @@ exports.getDailyAttendance = async (req, res) => {
     return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
   }
 
+  // Set times to ensure full day coverage
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+  
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
+
   try {
     const records = await Attendance.find({
-      date: { $gte: new Date(startDate), $lte: new Date(endDate) }
-    }).populate('user', 'name userId');
+      date: { $gte: start, $lte: end }
+    }).populate('user', 'name userId designation role'); 
     
-    // For a real app, you would format this as a CSV.
-    // For now, just send the JSON data.
     res.status(200).json({ success: true, count: records.length, data: records });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
 
-// @desc    Get Monthly Attendance Summary
+// @desc    Get Monthly Attendance Summary (Now supports Date Range)
 // @route   GET /api/v1/reports/attendance/monthly
 exports.getMonthlySummary = async (req, res) => {
-  const { month, year } = req.query; // month (1-12), year (YYYY)
+  // ✅ FIX: Accept startDate/endDate to match Flutter UI
+  const { startDate, endDate } = req.query; 
 
-  if (!month || !year) {
-    return res.status(400).json({ success: false, message: 'month and year are required' });
+  if (!startDate || !endDate) {
+    return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
   }
   
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0); // Day 0 of next month is last day of current
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+  
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
 
   try {
      const summary = await Attendance.aggregate([
-      { $match: { date: { $gte: startDate, $lte: endDate } } },
+      { $match: { date: { $gte: start, $lte: end } } },
       {
         $group: {
           _id: "$user",
           presentDays: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
           absentDays: { $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] } },
-          leaveDays: { $sum: { $cond: [{ $eq: ["$status", "leave"] }, 1, 0] } }
+          leaveDays: { $sum: { $cond: [{ $eq: ["$status", "leave"] }, 1, 0] } },
+          lateDays: { $sum: { $cond: [{ $eq: ["$status", "late"] }, 1, 0] } }
         }
       },
       {
@@ -60,31 +71,34 @@ exports.getMonthlySummary = async (req, res) => {
       { 
         $project: {
           _id: 0,
+
+          user:{
           userId: '$userDetails.userId',
           name: '$userDetails.name',
+          role: '$userDetails.role',
+          designation: '$userDetails.designation'
+          },
           presentDays: 1,
           absentDays: 1,
-          leaveDays: 1
+          leaveDays: 1,
+          lateDays: 1
         }
       }
     ]);
 
-    res.status(200).json({ success: true, data: summary });
+    res.status(200).json({ success: true, count: summary.length, data: summary });
     
   } catch (err) {
+     console.error(err);
      res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
 
-// @desc    Get Complaint Report
-// @route   GET /api/v1/reports/complaints
+// ... keep getComplaintReport as is
 exports.getComplaintReport = async (req, res) => {
   try {
     const complaints = await Complaint.find().populate('user', 'name userId');
-    
-    // Send JSON, format as CSV in a real app
     res.status(200).json({ success: true, count: complaints.length, data: complaints });
-
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server Error' });
   }

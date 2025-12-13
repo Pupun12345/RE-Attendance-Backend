@@ -51,14 +51,14 @@ exports.login = async (req, res) => {
   sendTokenResponse(user, 200, res);
 };
 
-// --- (You can keep your existing forgotPassword and resetPassword functions) ---
+
 exports.forgotPassword = async (req, res) => {
-  // ... (your code)
+  
 };
 exports.resetPassword = async (req, res) => {
-   // ... (your code)
+   
 };
-// ---
+
 
 
 const sendTokenResponse = async (user, statusCode, res) => {

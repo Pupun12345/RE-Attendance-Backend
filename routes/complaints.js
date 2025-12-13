@@ -18,7 +18,7 @@ router.route('/')
     uploadToGCS, 
     createComplaint
   )
-  .get(authorize('admin', 'management'), getComplaints); // Admin/Management can GET
+  .get(authorize('admin', 'management', 'supervisor'), getComplaints); // Admin/Management/Supervisor can GET
 
 // Admin/Management can PUT (update)
 router.route('/:id')

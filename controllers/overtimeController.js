@@ -62,11 +62,17 @@ exports.rejectOvertime = async (req, res) => {
 // @route   POST /api/v1/overtime
 // @access  Protected (All users)
 exports.createOvertimeRequest = async (req, res) => {
-  const { date, hours, reason } = req.body;
+  const { date, hours, reason, workerId } = req.body;
 
   try {
+    let targetUserId = req.user.id;
+
+    if (workerId && ['supervisor', 'management', 'admin'].includes(req.user.role)) {
+      targetUserId = workerId;
+    }
+
     const record = await Overtime.create({
-      user: req.user.id, // Comes from 'protect' middleware
+      user: targetUserId, // Comes from 'protect' middleware
       date,
       hours,
       reason,

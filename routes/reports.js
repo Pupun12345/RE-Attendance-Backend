@@ -10,9 +10,12 @@ const { protect, authorize } = require('../middleware/auth');
 const router = express.Router();
 
 router.use(protect);
-router.use(authorize('admin', 'management'));
 
-router.get('/attendance/daily', getDailyAttendance);
+// Daily attendance: accessible to admin, management, and supervisors
+router.get('/attendance/daily', authorize('admin', 'management', 'supervisor'), getDailyAttendance);
+
+// Monthly summary and complaints: only admin and management
+router.use(authorize('admin', 'management'));
 router.get('/attendance/monthly', getMonthlySummary);
 router.get('/complaints', getComplaintReport);
 

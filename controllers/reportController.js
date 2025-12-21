@@ -20,10 +20,20 @@ exports.getDailyAttendance = async (req, res) => {
   end.setHours(23, 59, 59, 999);
 
   try {
-    // Get all attendance records with user details
-    const records = await Attendance.find({
+    // Build query: if supervisor, only show their own records; otherwise show all
+    const query = {
       date: { $gte: start, $lte: end }
-    }).populate('user', 'name userId designation role').lean();
+    };
+    
+    // If user is a supervisor, filter to only their own attendance records
+    if (req.user.role === 'supervisor') {
+      query.user = req.user._id;
+    }
+    
+    // Get attendance records with user details
+    const records = await Attendance.find(query)
+      .populate('user', 'name userId designation role')
+      .lean();
     
     // Get all overtime records for the same date range
     const overtimeRecords = await Overtime.find({

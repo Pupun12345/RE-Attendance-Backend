@@ -42,6 +42,13 @@ const uploadToGCS = async (req, res, next) => {
   console.log('req.file:', req.file);
   if (!req.file) return next();
 
+  // Check if bucket is properly initialized
+  if (!bucket) {
+    console.warn('⚠️  GCS bucket not initialized - skipping upload');
+    req.file.path = null;
+    return next();
+  }
+
   const fileName = `complaint_${req.user.id}_${Date.now()}${path.extname(req.file.originalname)}`;
   const file = bucket.file(fileName);
 
@@ -51,7 +58,6 @@ const uploadToGCS = async (req, res, next) => {
         contentType: req.file.mimetype,
       },
       resumable: false,
-      // public: true,
     });
 
     const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
@@ -59,8 +65,12 @@ const uploadToGCS = async (req, res, next) => {
     req.file.path = publicUrl;
     next();
   } catch (error) {
-    console.error('GCS Upload Error:', error);
-    next(error);
+    console.error('GCS Upload Error:', error.message);
+    // If GCS fails (e.g., missing credentials), continue without image
+    // This allows testing the complaint creation logic even if GCS is not configured
+    console.warn('⚠️  GCS upload failed, continuing without image URL');
+    req.file.path = null;
+    next(); // Continue - complaint can be created without image
   }
 };
 

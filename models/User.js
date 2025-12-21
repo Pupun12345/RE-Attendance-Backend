@@ -32,6 +32,10 @@ const userSchema = new mongoose.Schema({
     enum: ['worker', 'supervisor', 'management', 'admin'],
     required: true,
   },
+  designation: {
+    type: String,
+    default: null,
+  },
   profileImageUrl: {
     type: String,
     default: null,

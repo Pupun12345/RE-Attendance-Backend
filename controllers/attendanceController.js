@@ -27,6 +27,43 @@ async function getImageBuffer(imageUrl) {
 }
 
 // --- 4. HELPER: Compare Faces (AWS Rekognition) ---
+// Helper function to parse location data from various formats
+function parseLocationData(location, lat, lng, address) {
+  let parsedLocation = {
+    longitude: null,
+    latitude: null,
+    address: null
+  };
+  
+  // If location is already an object
+  if (typeof location === 'object' && location !== null) {
+    parsedLocation = {
+      longitude: location.longitude || location.lng || null,
+      latitude: location.latitude || location.lat || null,
+      address: location.address || null
+    };
+  } 
+  // If location is a comma-separated string like "lat,lng"
+  else if (typeof location === 'string' && location.includes(',')) {
+    const parts = location.split(',');
+    parsedLocation = {
+      latitude: parts[0]?.trim() || null,
+      longitude: parts[1]?.trim() || null,
+      address: address || null
+    };
+  }
+  // If location is just an address string or separate fields are provided
+  else {
+    parsedLocation = {
+      longitude: lng || null,
+      latitude: lat || null,
+      address: address || location || null
+    };
+  }
+  
+  return parsedLocation;
+}
+
 async function verifyFace(sourceImageUrl, targetImageUrl) {
   try {
     const sourceBuffer = await getImageBuffer(sourceImageUrl);
@@ -61,7 +98,7 @@ async function verifyFace(sourceImageUrl, targetImageUrl) {
 // 1. SUPERVISOR CHECK-IN FOR WORKER (Normal Network)
 // ==========================================
 exports.supervisorCheckInWorker = async (req, res) => {
-  const { workerId, location } = req.body;
+  const { workerId, location, lat, lng, address } = req.body;
   console.log('Worker ID:', workerId);
 
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
@@ -93,12 +130,15 @@ exports.supervisorCheckInWorker = async (req, res) => {
     const isMatch = await verifyFace(worker.profileImageUrl, req.file.path);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
 
+    // Parse location data - handle different formats from frontend
+    const checkInLocation = parseLocationData(location, lat, lng, address);
+
     record = await Attendance.create({
       user: workerId,
       date: today,
       status: 'present',
       checkInTime: new Date(),
-      checkInLocation: location,
+      checkInLocation: checkInLocation,
       checkInSelfie: req.file.path,
       notes: `Punch In by Supervisor: ${req.user.name}`
     });
@@ -115,7 +155,7 @@ exports.supervisorCheckInWorker = async (req, res) => {
 // 2. SUPERVISOR CHECK-OUT FOR WORKER (Normal Network)
 // ==========================================
 exports.supervisorCheckOutWorker = async (req, res) => {
-  const { workerId, location } = req.body;
+  const { workerId, location, lat, lng, address } = req.body;
 
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
   if (!req.file) return res.status(400).json({ success: false, message: 'Photo is required' });
@@ -144,9 +184,12 @@ exports.supervisorCheckOutWorker = async (req, res) => {
     const isMatch = await verifyFace(worker.profileImageUrl, req.file.path);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
 
+    // Parse location data - handle different formats from frontend
+    const checkOutLocation = parseLocationData(location, lat, lng, address);
+
     // Update record
     record.checkOutTime = new Date();
-    record.checkOutLocation = location;
+    record.checkOutLocation = checkOutLocation;
     record.checkOutSelfie = req.file.path;
 
     const note = `Punch Out by Supervisor: ${req.user.name}`;
@@ -402,7 +445,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
 // --- EXISTING CONTROLLERS ---
 
 exports.selfCheckIn = async (req, res) => {
-  const { location } = req.body;
+  const { location, lat, lng, address } = req.body;
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
   const today = new Date();
@@ -429,12 +472,15 @@ exports.selfCheckIn = async (req, res) => {
       if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
     }
 
+    // Parse location data
+    const checkInLocation = parseLocationData(location, lat, lng, address);
+
     record = await Attendance.create({
       user: req.user.id,
       date: today,
       status: 'present',
       checkInTime: new Date(),
-      checkInLocation: location,
+      checkInLocation: checkInLocation,
       checkInSelfie: req.file.path,
       notes: 'Self check-in'
     });
@@ -447,7 +493,7 @@ exports.selfCheckIn = async (req, res) => {
 };
 
 exports.selfCheckOut = async (req, res) => {
-  const { location } = req.body;
+  const { location, lat, lng, address } = req.body;
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
   const today = new Date();
@@ -472,8 +518,11 @@ exports.selfCheckOut = async (req, res) => {
       if (!isMatch) return res.status(400).json({ success: false, message: 'Face verification failed.' });
     }
 
+    // Parse location data
+    const checkOutLocation = parseLocationData(location, lat, lng, address);
+
     record.checkOutTime = new Date();
-    record.checkOutLocation = location;
+    record.checkOutLocation = checkOutLocation;
     record.checkOutSelfie = req.file.path;
     await record.save();
 

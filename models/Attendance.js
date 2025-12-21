@@ -24,6 +24,42 @@ const attendanceSchema = new mongoose.Schema({
   },
   notes: { // Optional: Good for users to add a reason for manual request
     type: String,
+  },
+  checkInLocation: {
+    longitude: {
+      type: String,
+      default: null,
+    },
+    latitude: {
+      type: String,
+      default: null,
+    },
+    address: {
+      type: String,
+      default: null,
+    }
+  },
+  checkOutLocation: {
+    longitude: {
+      type: String,
+      default: null,
+    },
+    latitude: {
+      type: String,
+      default: null,
+    },
+    address: {
+      type: String,
+      default: null,
+    }
+  },
+  checkInSelfie: {
+    type: String,
+    default: null,
+  },
+  checkOutSelfie: {
+    type: String,
+    default: null,
   }
 }, { timestamps: true });
 

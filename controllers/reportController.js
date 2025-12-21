@@ -1,6 +1,7 @@
 // controllers/reportController.js
 const Attendance = require('../models/Attendance');
 const Complaint = require('../models/Complaint');
+const Overtime = require('../models/Overtime');
 
 // @desc    Get Daily Attendance Report
 // @route   GET /api/v1/reports/attendance/daily
@@ -19,11 +20,54 @@ exports.getDailyAttendance = async (req, res) => {
   end.setHours(23, 59, 59, 999);
 
   try {
+    // Get all attendance records with user details
     const records = await Attendance.find({
       date: { $gte: start, $lte: end }
-    }).populate('user', 'name userId designation role'); 
+    }).populate('user', 'name userId designation role').lean();
     
-    res.status(200).json({ success: true, count: records.length, data: records });
+    // Get all overtime records for the same date range
+    const overtimeRecords = await Overtime.find({
+      date: { $gte: start, $lte: end },
+      status: 'approved' // Only count approved overtime
+    }).lean();
+    
+    // Create a map of user+date to overtime hours for quick lookup
+    const overtimeMap = new Map();
+    overtimeRecords.forEach(ot => {
+      const key = `${ot.user.toString()}_${ot.date.toISOString().split('T')[0]}`;
+      overtimeMap.set(key, ot.hours);
+    });
+    
+    // Enrich attendance records with overtime data
+    const enrichedRecords = records.map(record => {
+      const recordDate = new Date(record.date).toISOString().split('T')[0];
+      const overtimeKey = `${record.user._id.toString()}_${recordDate}`;
+      const overtimeHours = overtimeMap.get(overtimeKey) || 0;
+      
+      return {
+        ...record,
+        ot: overtimeHours,
+        overtime: overtimeHours,
+        // Ensure checkInLocation is properly structured
+        checkInLocation: record.checkInLocation || {
+          longitude: null,
+          latitude: null,
+          address: null
+        },
+        // Ensure checkOutLocation is properly structured
+        checkOutLocation: record.checkOutLocation || {
+          longitude: null,
+          latitude: null,
+          address: null
+        },
+        // Add backward compatibility fields
+        longitude: record.checkInLocation?.longitude || null,
+        latitude: record.checkInLocation?.latitude || null,
+        address: record.checkInLocation?.address || null,
+      };
+    });
+    
+    res.status(200).json({ success: true, count: enrichedRecords.length, data: enrichedRecords });
 
   } catch (err) {
     console.error(err);

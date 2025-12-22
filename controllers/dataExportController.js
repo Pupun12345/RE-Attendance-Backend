@@ -61,8 +61,13 @@ exports.exportAllData = async (req, res) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      if (usersRes.data.success && usersRes.data.data) {
-        allData.users = usersRes.data.data.map(user => ({
+      console.log(`   📊 Users API Response: success=${usersRes.data.success}, keys=${Object.keys(usersRes.data).join(', ')}`);
+      
+      // Handle different response formats: {users} or {data}
+      const usersArray = usersRes.data.users || usersRes.data.data || [];
+      
+      if (usersRes.data.success) {
+        allData.users = usersArray.map(user => ({
           userId: user.userId,
           name: user.name,
           email: user.email,
@@ -75,26 +80,39 @@ exports.exportAllData = async (req, res) => {
           updatedAt: user.updatedAt
         }));
         console.log(`   ✅ Fetched ${allData.users.length} users`);
+      } else {
+        console.log(`   ⚠️  Users API returned success=false`);
+        allData.errors.push(`Users: API returned success=false`);
       }
     } catch (err) {
       allData.errors.push(`Users: ${err.message}`);
       console.error(`   ❌ Error fetching users: ${err.message}`);
+      if (err.response) {
+        console.error(`   Response status: ${err.response.status}`);
+        console.error(`   Response data:`, JSON.stringify(err.response.data, null, 2));
+      }
     }
 
-    // Fetch Attendance - Get last 12 months
+    // Fetch Attendance - Get ALL records (start from a very early date)
     try {
       const endDate = new Date().toISOString().split('T')[0];
+      // Start from 2 years ago to get all records
       const startDate = new Date();
-      startDate.setMonth(startDate.getMonth() - 12);
+      startDate.setFullYear(startDate.getFullYear() - 2);
       const startDateStr = startDate.toISOString().split('T')[0];
+
+      console.log(`   📅 Fetching attendance from ${startDateStr} to ${endDate}`);
 
       const attendanceRes = await axios.get(
         `${PRODUCTION_URL}/api/v1/reports/attendance/daily?startDate=${startDateStr}&endDate=${endDate}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
-      if (attendanceRes.data.success && attendanceRes.data.data) {
-        allData.attendance = attendanceRes.data.data.map(record => ({
+      // Handle different response formats: {data} or {attendance}
+      const attendanceArray = attendanceRes.data.data || attendanceRes.data.attendance || [];
+
+      if (attendanceRes.data.success && attendanceArray.length > 0) {
+        allData.attendance = attendanceArray.map(record => ({
           user: record.user ? {
             userId: record.user.userId,
             name: record.user.name,
@@ -115,10 +133,16 @@ exports.exportAllData = async (req, res) => {
           updatedAt: record.updatedAt
         }));
         console.log(`   ✅ Fetched ${allData.attendance.length} attendance records`);
+      } else {
+        console.log(`   ⚠️  No attendance records found or empty response`);
       }
     } catch (err) {
       allData.errors.push(`Attendance: ${err.message}`);
       console.error(`   ❌ Error fetching attendance: ${err.message}`);
+      if (err.response) {
+        console.error(`   Response status: ${err.response.status}`);
+        console.error(`   Response data:`, JSON.stringify(err.response.data, null, 2));
+      }
     }
 
     // Fetch Complaints
@@ -127,8 +151,13 @@ exports.exportAllData = async (req, res) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (complaintsRes.data.success && complaintsRes.data.data) {
-        allData.complaints = complaintsRes.data.data.map(complaint => ({
+      console.log(`   📊 Complaints API Response: success=${complaintsRes.data.success}, keys=${Object.keys(complaintsRes.data).join(', ')}`);
+
+      // Handle different response formats: {complaints} or {data}
+      const complaintsArray = complaintsRes.data.complaints || complaintsRes.data.data || [];
+
+      if (complaintsRes.data.success) {
+        allData.complaints = complaintsArray.map(complaint => ({
           user: complaint.user ? {
             userId: complaint.user.userId || complaint.user,
             name: complaint.user.name || null
@@ -145,10 +174,17 @@ exports.exportAllData = async (req, res) => {
           updatedAt: complaint.updatedAt
         }));
         console.log(`   ✅ Fetched ${allData.complaints.length} complaints`);
+      } else {
+        console.log(`   ⚠️  Complaints API returned success=false`);
+        allData.errors.push(`Complaints: API returned success=false`);
       }
     } catch (err) {
       allData.errors.push(`Complaints: ${err.message}`);
       console.error(`   ❌ Error fetching complaints: ${err.message}`);
+      if (err.response) {
+        console.error(`   Response status: ${err.response.status}`);
+        console.error(`   Response data:`, JSON.stringify(err.response.data, null, 2));
+      }
     }
 
     // Fetch Holidays
@@ -157,28 +193,52 @@ exports.exportAllData = async (req, res) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (holidaysRes.data.success && holidaysRes.data.data) {
-        allData.holidays = holidaysRes.data.data;
+      console.log(`   📊 Holidays API Response: success=${holidaysRes.data.success}, keys=${Object.keys(holidaysRes.data).join(', ')}`);
+
+      // Handle different response formats: {holidays} or {data}
+      const holidaysArray = holidaysRes.data.holidays || holidaysRes.data.data || [];
+
+      if (holidaysRes.data.success) {
+        allData.holidays = holidaysArray;
         console.log(`   ✅ Fetched ${allData.holidays.length} holidays`);
+      } else {
+        console.log(`   ⚠️  Holidays API returned success=false`);
+        allData.errors.push(`Holidays: API returned success=false`);
       }
     } catch (err) {
       allData.errors.push(`Holidays: ${err.message}`);
       console.warn(`   ⚠️  Could not fetch holidays: ${err.message}`);
+      if (err.response) {
+        console.error(`   Response status: ${err.response.status}`);
+        console.error(`   Response data:`, JSON.stringify(err.response.data, null, 2));
+      }
     }
 
-    // Fetch Overtime
+    // Fetch Overtime - Get ALL records (no status filter)
     try {
       const overtimeRes = await axios.get(`${PRODUCTION_URL}/api/v1/overtime`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (overtimeRes.data.success && overtimeRes.data.data) {
-        allData.overtime = overtimeRes.data.data;
+      console.log(`   📊 Overtime API Response: success=${overtimeRes.data.success}, keys=${Object.keys(overtimeRes.data).join(', ')}`);
+
+      // Handle different response formats: {data} or {overtime}
+      const overtimeArray = overtimeRes.data.data || overtimeRes.data.overtime || [];
+
+      if (overtimeRes.data.success) {
+        allData.overtime = overtimeArray;
         console.log(`   ✅ Fetched ${allData.overtime.length} overtime records`);
+      } else {
+        console.log(`   ⚠️  Overtime API returned success=false`);
+        allData.errors.push(`Overtime: API returned success=false`);
       }
     } catch (err) {
       allData.errors.push(`Overtime: ${err.message}`);
       console.warn(`   ⚠️  Could not fetch overtime: ${err.message}`);
+      if (err.response) {
+        console.error(`   Response status: ${err.response.status}`);
+        console.error(`   Response data:`, JSON.stringify(err.response.data, null, 2));
+      }
     }
 
     // Calculate totals

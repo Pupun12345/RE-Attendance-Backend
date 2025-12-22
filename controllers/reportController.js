@@ -11,19 +11,36 @@ exports.getDailyAttendance = async (req, res) => {
     return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
   }
 
-  // Set times to ensure full day coverage
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
-  
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
+  // Set times to ensure full day coverage (UTC)
+  const start = new Date(startDate + 'T00:00:00.000Z');
+  const end = new Date(endDate + 'T23:59:59.999Z');
 
   try {
-    const records = await Attendance.find({
+    // Build query - supervisors can only see their own records
+    const query = {
       date: { $gte: start, $lte: end }
-    }).populate('user', 'name userId designation role'); 
+    };
+
+    // If user is a supervisor, filter to only their own records
+    if (req.user.role === 'supervisor') {
+      query.user = req.user._id;
+    }
+
+    const records = await Attendance.find(query)
+      .populate('user', 'name userId role')
+      .sort({ date: -1, user: 1 })
+      .lean();
+
+    // Map records to include designation (using role as designation)
+    const mappedRecords = records.map(record => ({
+      ...record,
+      user: {
+        ...record.user,
+        designation: record.user?.role || null
+      }
+    }));
     
-    res.status(200).json({ success: true, count: records.length, data: records });
+    res.status(200).json({ success: true, count: mappedRecords.length, data: mappedRecords });
 
   } catch (err) {
     console.error(err);

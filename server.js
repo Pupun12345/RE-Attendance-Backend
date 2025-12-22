@@ -20,6 +20,7 @@ const holidayRoutes = require('./routes/holidays');
 const overtimeRoutes = require('./routes/overtime');
 const reportRoutes = require('./routes/reports');
 const setupRoutes = require('./routes/setup');
+const dataExportRoutes = require('./routes/dataExport');
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use('/api/v1/holidays', holidayRoutes);
 app.use('/api/v1/overtime', overtimeRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/setup', setupRoutes);
+app.use('/api/v1/export', dataExportRoutes);
 
 // Simple test route
 app.get('/', (req, res) => {

@@ -46,26 +46,10 @@ exports.updateComplaint = async (req, res) => {
 // @route   POST /api/v1/complaints
 // @access  Protected (Supervisor, Management)
 exports.createComplaint = async (req, res) => {
-  
-  // --- 1. The text fields are now correctly parsed by multer ---
-  console.log("Request Body:", req.body);
-  const { title, description, workerId } = req.body;
-
-  // 2. Create the data object
-  const complaintData = {
-    title,
-    description,
-    user: targetUserId,      // The Worker (Affected User)
-    submittedBy: submittedBy // Comes from 'protect' middleware
-  };
-
-  // --- 3. Check if an image was uploaded ---
-  if (req.file) {
-    complaintData.imageUrl = req.file.path; // Get the GCS URL
-  }
-
   try {
-    // FIX: Define target variables
+    const { title, description, workerId } = req.body;
+
+    // Define target variables
     let targetUserId = req.user.id;
     let submittedBy = null;
 
@@ -75,6 +59,7 @@ exports.createComplaint = async (req, res) => {
       submittedBy = req.user.id;
     }
 
+    // Create the complaint data object
     const complaintData = {
       title,
       description,
@@ -82,14 +67,16 @@ exports.createComplaint = async (req, res) => {
       submittedBy: submittedBy 
     };
 
-    if (req.file) {
+    // Check if an image was uploaded
+    if (req.file && req.file.path) {
       complaintData.imageUrl = req.file.path; 
     }
-    // --- 4. Create the complaint ---
+
+    // Create the complaint
     const complaint = await Complaint.create(complaintData);
     res.status(201).json({ success: true, data: complaint });
   } catch (err) {
-    // This validation error will no longer happen
+    console.error("Create Complaint Error:", err);
     res.status(400).json({ success: false, message: err.message });
   }
 };

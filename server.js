@@ -27,8 +27,9 @@ const app = express();
 // Enable CORS
 app.use(cors());
 
-// Body parser
-app.use(express.json());
+// Body parser - Increase limit for base64 image uploads (10MB)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 
 app.use(morgan('dev'));

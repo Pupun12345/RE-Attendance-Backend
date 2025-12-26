@@ -1,6 +1,7 @@
 // controllers/reportController.js
 const Attendance = require('../models/Attendance');
 const Complaint = require('../models/Complaint');
+const Overtime = require('../models/Overtime');
 
 // @desc    Get Daily Attendance Report
 // @route   GET /api/v1/reports/attendance/daily
@@ -31,14 +32,39 @@ exports.getDailyAttendance = async (req, res) => {
       .sort({ date: -1, user: 1 })
       .lean();
 
-    // Map records to include designation (using role as designation)
-    const mappedRecords = records.map(record => ({
-      ...record,
-      user: {
-        ...record.user,
-        designation: record.user?.role || null
-      }
-    }));
+    // Fetch approved overtime records for the date range
+    const overtimeRecords = await Overtime.find({
+      date: { $gte: start, $lte: end },
+      status: 'approved'
+    }).lean();
+
+    // Create a map of user+date -> overtime hours for quick lookup
+    const overtimeMap = new Map();
+    overtimeRecords.forEach(ot => {
+      const userId = ot.user?.toString() || ot.user;
+      const dateStr = new Date(ot.date).toISOString().split('T')[0];
+      const dateKey = `${userId}_${dateStr}`;
+      overtimeMap.set(dateKey, ot.hours);
+    });
+
+    // Map records to include designation and overtime hours
+    const mappedRecords = records.map(record => {
+      const userId = record.user?._id?.toString() || record.user?.toString() || record.user;
+      const dateStr = new Date(record.date).toISOString().split('T')[0];
+      const dateKey = `${userId}_${dateStr}`;
+      const overtimeHours = overtimeMap.get(dateKey) || 0;
+      
+      return {
+        ...record,
+        user: {
+          ...record.user,
+          designation: record.user?.role || null
+        },
+        ot: overtimeHours,
+        overtime: overtimeHours,
+        overtimeHours: overtimeHours
+      };
+    });
     
     res.status(200).json({ success: true, count: mappedRecords.length, data: mappedRecords });
 

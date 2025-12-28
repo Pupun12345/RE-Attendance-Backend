@@ -42,7 +42,9 @@ exports.login = async (req, res) => {
       .json({ success: false, message: 'Invalid credentials' });
   }
 
-  if (!['admin', 'management', 'supervisor'].includes(user.role)) {
+  // Allow all roles to login (admin, management, supervisor, worker)
+  // Workers can use mobile app for self-attendance
+  if (!['admin', 'management', 'supervisor', 'worker'].includes(user.role)) {
     return res
       .status(403)
       .json({ success: false, message: 'Login forbidden for this role' });

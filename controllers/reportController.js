@@ -108,14 +108,43 @@ exports.getDailyAttendance = async (req, res) => {
         
         if (existingRecord) {
           // User has an attendance record for this date
+          // Normalize location structure for frontend compatibility
+          const checkInLoc = existingRecord.checkInLocation || {};
+          const checkOutLoc = existingRecord.checkOutLocation || {};
+          
+          // Normalize location structure for frontend compatibility
+          // Frontend expects: checkInLocation = { longitude, latitude, address } or null
+          // Also supports fallback: record['longitude'], record['latitude'], record['address']
+          const normalizedCheckInLocation = existingRecord.checkInLocation 
+            ? {
+                longitude: existingRecord.checkInLocation.longitude || existingRecord.checkInLocation.lng || null,
+                latitude: existingRecord.checkInLocation.latitude || existingRecord.checkInLocation.lat || null,
+                address: existingRecord.checkInLocation.address || null
+              }
+            : null;
+          
+          const normalizedCheckOutLocation = existingRecord.checkOutLocation
+            ? {
+                longitude: existingRecord.checkOutLocation.longitude || existingRecord.checkOutLocation.lng || null,
+                latitude: existingRecord.checkOutLocation.latitude || existingRecord.checkOutLocation.lat || null,
+                address: existingRecord.checkOutLocation.address || null
+              }
+            : null;
+          
           allRecords.push({
             ...existingRecord,
             user: {
               ...existingRecord.user,
               designation: existingRecord.user?.role || null
             },
-            checkInLocation: existingRecord.checkInLocation || null,
-            checkOutLocation: existingRecord.checkOutLocation || null,
+            // Provide location objects with consistent structure for frontend
+            checkInLocation: normalizedCheckInLocation,
+            checkOutLocation: normalizedCheckOutLocation,
+            // Backward compatibility: also include at root level for frontend fallbacks
+            // Frontend code: location['longitude'] ?? record['longitude'] ?? '0.0'
+            longitude: normalizedCheckInLocation?.longitude || null,
+            latitude: normalizedCheckInLocation?.latitude || null,
+            address: normalizedCheckInLocation?.address || null,
             checkInSelfie: existingRecord.checkInSelfie || null,
             checkOutSelfie: existingRecord.checkOutSelfie || null,
             ot: overtimeHours,
@@ -138,8 +167,13 @@ exports.getDailyAttendance = async (req, res) => {
             checkOutTime: null,
             status: 'absent',
             notes: null,
+            // Frontend expects location objects or null, with fallback to root level fields
             checkInLocation: null,
             checkOutLocation: null,
+            // Backward compatibility: include at root level for frontend fallbacks
+            longitude: null,
+            latitude: null,
+            address: null,
             checkInSelfie: null,
             checkOutSelfie: null,
             ot: overtimeHours,

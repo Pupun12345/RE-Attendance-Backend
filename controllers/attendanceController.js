@@ -26,6 +26,43 @@ async function getImageBuffer(imageUrl) {
   }
 }
 
+// --- 3.4. HELPER: Get Today in IST (UTC+5:30) ---
+// Returns today's date at 00:00:00 IST (stored as UTC internally)
+function getTodayIST() {
+  const now = new Date();
+  // Get current time in IST (UTC+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  // Get date string in IST (YYYY-MM-DD)
+  const year = istTime.getUTCFullYear();
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  const istDateStr = `${year}-${month}-${day}`;
+  
+  // Create date at 00:00:00 IST (which is 18:30:00 previous day UTC)
+  const todayIST = new Date(istDateStr + 'T00:00:00.000+05:30');
+  
+  return todayIST;
+}
+
+// --- 3.4.1. HELPER: Get Start of Day in IST for a given date ---
+// Converts any date to start of day (00:00:00) in IST
+function getStartOfDayIST(date) {
+  // Convert date to IST
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(date.getTime() + istOffset);
+  
+  // Get date string in IST (YYYY-MM-DD)
+  const year = istTime.getUTCFullYear();
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  const istDateStr = `${year}-${month}-${day}`;
+  
+  // Create date at 00:00:00 IST
+  return new Date(istDateStr + 'T00:00:00.000+05:30');
+}
+
 // --- 3.5. HELPER: Parse Location Data ---
 function parseLocation(location) {
   // If location is undefined or null, return null
@@ -130,8 +167,7 @@ exports.supervisorCheckInWorker = async (req, res) => {
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
   if (!req.file) return res.status(400).json({ success: false, message: 'Photo is required' });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -179,6 +215,10 @@ exports.supervisorCheckInWorker = async (req, res) => {
       notes: `Punch In by Supervisor: ${req.user.name}`
     });
 
+    // Reload record to ensure all fields are included
+    record = await Attendance.findById(record._id);
+    console.log('   Record after save - checkInLocation:', record?.checkInLocation);
+
     // Include debug info in response for testing
     const responseData = record.toObject();
     if (process.env.NODE_ENV !== 'production') {
@@ -206,20 +246,39 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
   if (!req.file) return res.status(400).json({ success: false, message: 'Photo is required' });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   try {
+    // Debug: Check what records exist for this worker today
+    const allTodayRecords = await Attendance.find({
+      user: workerId,
+      date: { $gte: today, $lt: tomorrow }
+    }).lean();
+    console.log('🔍 Check-out Debug:');
+    console.log('   Worker ID:', workerId);
+    console.log('   Today records found:', allTodayRecords.length);
+    console.log('   Records:', JSON.stringify(allTodayRecords.map(r => ({
+      id: r._id,
+      status: r.status,
+      hasCheckIn: !!r.checkInTime,
+      hasCheckOut: !!r.checkOutTime,
+      date: r.date
+    })), null, 2));
+
     let record = await Attendance.findOne({
       user: workerId,
       date: { $gte: today, $lt: tomorrow },
+      checkInTime: { $exists: true },
       checkOutTime: { $exists: false }
     });
 
-    if (!record || record.status !== 'present') {
+    if (!record) {
       return res.status(400).json({ success: false, message: 'Worker has not checked in today.' });
+    }
+    if (record.status !== 'present') {
+      return res.status(400).json({ success: false, message: `Worker attendance status is '${record.status}', not 'present'. Cannot check out.` });
     }
     if (record.checkOutTime) {
       return res.status(400).json({ success: false, message: 'Worker already checked out.' });
@@ -236,15 +295,25 @@ exports.supervisorCheckOutWorker = async (req, res) => {
     }
 
     // Update record
+    const parsedCheckOutLocation = parseLocation(location);
+    console.log('   Check-out Location (parsed):', parsedCheckOutLocation);
+    console.log('   Location from req.body:', location);
+    console.log('   Location type:', typeof location);
+    
     record.checkOutTime = new Date();
-    record.checkOutLocation = parseLocation(location);
+    record.checkOutLocation = parsedCheckOutLocation;
     record.checkOutSelfie = req.file.path;
 
     const note = `Punch Out by Supervisor: ${req.user.name}`;
     record.notes = record.notes ? `${record.notes} | ${note}` : note;
 
     await record.save();
-    res.status(200).json({ success: true, data: record });
+    
+    // Reload record to ensure all fields are included
+    const savedRecord = await Attendance.findById(record._id);
+    console.log('   Record after save - checkOutLocation:', savedRecord?.checkOutLocation);
+    
+    res.status(200).json({ success: true, data: savedRecord });
 
   } catch (err) {
     console.error(err);
@@ -265,10 +334,11 @@ exports.supervisorCreatePendingCheckIn = async (req, res) => {
   try {
     // Use the timestamp passed from the app (when photo was taken offline)
     const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDateIST = getStartOfDayIST(attendanceDate);
     
     const record = await Attendance.create({
       user: workerId,
-      date: attendanceDate,
+      date: attendanceDateIST,
       status: 'pending', // IMPORTANT: Goes to Admin Pending Queue
       checkInTime: attendanceDate,
       checkInLocation: parseLocation(location),
@@ -294,11 +364,10 @@ exports.supervisorCreatePendingCheckOut = async (req, res) => {
   }
 
   try {
-    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDate = dateTime ? new Date(dateTime) : getTodayIST();
     
-    const startOfDay = new Date(attendanceDate);
-    startOfDay.setHours(0,0,0,0);
-    const endOfDay = new Date(attendanceDate);
+    const startOfDay = getStartOfDayIST(attendanceDate);
+    const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
 
     // Try to find existing record for that day
@@ -319,7 +388,7 @@ exports.supervisorCreatePendingCheckOut = async (req, res) => {
       // No check-in found (maybe check-in was also offline and not synced yet?)
       record = await Attendance.create({
         user: workerId,
-        date: attendanceDate,
+        date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
         checkOutLocation: parseLocation(location),
@@ -350,10 +419,11 @@ exports.selfCreatePendingCheckIn = async (req, res) => {
   try {
     // Use the time provided by the app (when the photo was actually taken)
     const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDateIST = getStartOfDayIST(attendanceDate);
     
     const record = await Attendance.create({
       user: req.user.id, 
-      date: attendanceDate,
+      date: attendanceDateIST,
       status: 'pending', // <--- Goes to Admin Queue
       checkInTime: attendanceDate,
       checkInLocation: parseLocation(location),
@@ -374,12 +444,11 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
   try {
-    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDate = dateTime ? new Date(dateTime) : getTodayIST();
     
     // Find today's record
-    const startOfDay = new Date(attendanceDate);
-    startOfDay.setHours(0,0,0,0);
-    const endOfDay = new Date(attendanceDate);
+    const startOfDay = getStartOfDayIST(attendanceDate);
+    const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
 
     let record = await Attendance.findOne({
@@ -398,7 +467,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
       // Create new if no check-in found
       record = await Attendance.create({
         user: req.user.id,
-        date: attendanceDate,
+        date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
         checkOutLocation: parseLocation(location),
@@ -426,10 +495,11 @@ exports.selfCreatePendingCheckIn = async (req, res) => {
   try {
     // Use the time provided by the app (when the photo was actually taken)
     const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDateIST = getStartOfDayIST(attendanceDate);
     
     const record = await Attendance.create({
       user: req.user.id, 
-      date: attendanceDate,
+      date: attendanceDateIST,
       status: 'pending', // <--- Goes to Admin Queue
       checkInTime: attendanceDate,
       checkInLocation: parseLocation(location),
@@ -450,12 +520,11 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
   try {
-    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
+    const attendanceDate = dateTime ? new Date(dateTime) : getTodayIST();
     
     // Find today's record
-    const startOfDay = new Date(attendanceDate);
-    startOfDay.setHours(0,0,0,0);
-    const endOfDay = new Date(attendanceDate);
+    const startOfDay = getStartOfDayIST(attendanceDate);
+    const endOfDay = new Date(startOfDay);
     endOfDay.setDate(endOfDay.getDate() + 1);
 
     let record = await Attendance.findOne({
@@ -474,7 +543,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
       // Create new if no check-in found
       record = await Attendance.create({
         user: req.user.id,
-        date: attendanceDate,
+        date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
         checkOutLocation: parseLocation(location),
@@ -496,8 +565,7 @@ exports.selfCheckIn = async (req, res) => {
   const { location } = req.body;
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -549,8 +617,7 @@ exports.selfCheckOut = async (req, res) => {
   const { location } = req.body;
   if (!req.file) return res.status(400).json({ success: false, message: 'Selfie is required' });
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayIST();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -591,8 +658,7 @@ exports.selfCheckOut = async (req, res) => {
 
 exports.getTodaySummary = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayIST();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -685,8 +751,7 @@ exports.rejectAttendance = async (req, res) => {
 
 exports.getDailyStatusReport = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayIST();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -721,8 +786,7 @@ exports.markWorkerAttendance = async (req, res) => {
   if (!workerId) return res.status(400).json({ success: false, message: 'Worker ID is required' });
 
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayIST();
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 

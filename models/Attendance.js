@@ -17,6 +17,22 @@ const attendanceSchema = new mongoose.Schema({
   checkOutTime: {
     type: Date,
   },
+  checkInLocation: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  checkOutLocation: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  checkInSelfie: {
+    type: String,
+    default: null
+  },
+  checkOutSelfie: {
+    type: String,
+    default: null
+  },
   status: {
     type: String,
     enum: ['present', 'absent', 'leave', 'pending', 'rejected'], // ADDED 'pending' and 'rejected'

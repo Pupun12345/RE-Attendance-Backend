@@ -54,10 +54,10 @@ exports.getDailyAttendance = async (req, res) => {
       .sort({ date: -1, user: 1 })
       .lean();
 
-    // Fetch approved overtime records for the date range
+    // Fetch overtime records for the date range (include pending and approved, exclude rejected)
     const overtimeRecords = await Overtime.find({
       date: { $gte: start, $lte: end },
-      status: 'approved'
+      status: { $in: ['pending', 'approved'] }
     }).lean();
 
     // Create a map of user+date -> overtime hours for quick lookup
@@ -70,6 +70,11 @@ exports.getDailyAttendance = async (req, res) => {
       const dateStr = otDateIST.toISOString().split('T')[0];
       const dateKey = `${userId}_${dateStr}`;
       overtimeMap.set(dateKey, ot.hours);
+      
+      // Debug logging (can be removed in production)
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`📊 Overtime mapping: userId=${userId}, date=${dateStr}, hours=${ot.hours}, status=${ot.status}, key=${dateKey}`);
+      }
     });
 
     // Create a map of user+date -> attendance record for quick lookup
@@ -228,14 +233,32 @@ exports.getMonthlySummary = async (req, res) => {
     return res.status(400).json({ success: false, message: 'startDate and endDate are required' });
   }
   
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
+  // Parse dates in IST (UTC+5:30) to match how attendance dates are stored
+  // When user selects Jan 1, they mean Jan 1 IST, which is Dec 31 18:30 UTC
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
   
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
+  // Parse dates as IST - JavaScript automatically converts to UTC internally
+  // Jan 1 00:00 IST becomes Dec 31 18:30 UTC internally
+  // Use the same approach as daily report for consistency
+  const startIST = new Date(startDate + 'T00:00:00.000+05:30');
+  const endIST = new Date(endDate + 'T23:59:59.999+05:30');
+  
+  // Use directly for MongoDB query (already in UTC internally)
+  const start = startIST;
+  const end = endIST;
+
+  // Debug logging
+  console.log('📊 Monthly Report Query:');
+  console.log('  Input dates:', { startDate, endDate });
+  console.log('  Query range (UTC):', { start: start.toISOString(), end: end.toISOString() });
+  console.log('  Query range (IST):', { 
+    startIST: new Date(start.getTime() - IST_OFFSET_MS).toISOString(),
+    endIST: new Date(end.getTime() - IST_OFFSET_MS).toISOString()
+  });
 
   try {
-     const summary = await Attendance.aggregate([
+    // Get attendance summary
+    const summary = await Attendance.aggregate([
       { $match: { date: { $gte: start, $lte: end } } },
       {
         $group: {
@@ -258,12 +281,12 @@ exports.getMonthlySummary = async (req, res) => {
       { 
         $project: {
           _id: 0,
-
-          user:{
-          userId: '$userDetails.userId',
-          name: '$userDetails.name',
-          role: '$userDetails.role',
-          designation: '$userDetails.designation'
+          userId: '$_id',
+          user: {
+            userId: '$userDetails.userId',
+            name: '$userDetails.name',
+            role: '$userDetails.role',
+            designation: '$userDetails.designation'
           },
           presentDays: 1,
           absentDays: 1,
@@ -273,7 +296,106 @@ exports.getMonthlySummary = async (req, res) => {
       }
     ]);
 
-    res.status(200).json({ success: true, count: summary.length, data: summary });
+    // Debug: Log summary results
+    console.log('  Attendance records found:', summary.length);
+    if (summary.length > 0) {
+      console.log('  Sample record:', JSON.stringify(summary[0], null, 2));
+    } else {
+      // Check if there are any attendance records in the database for debugging
+      const sampleRecords = await Attendance.find({ 
+        date: { 
+          $gte: new Date(startDate + 'T00:00:00.000Z'), 
+          $lte: new Date(endDate + 'T23:59:59.999Z') 
+        } 
+      })
+        .limit(5)
+        .lean();
+      console.log('  ⚠️  No records found in query range. Sample records in date range (UTC):', 
+        sampleRecords.map(r => ({ date: r.date?.toISOString(), user: r.user, status: r.status }))
+      );
+    }
+
+    // Fetch overtime records for the date range (include pending and approved)
+    const overtimeRecords = await Overtime.find({
+      date: { $gte: start, $lte: end },
+      status: { $in: ['pending', 'approved'] }
+    }).lean();
+
+    // Calculate total overtime hours per user
+    const overtimeMap = new Map();
+    overtimeRecords.forEach(ot => {
+      const userId = ot.user?.toString() || ot.user;
+      const currentHours = overtimeMap.get(userId) || 0;
+      overtimeMap.set(userId, currentHours + ot.hours);
+    });
+
+    // Join overtime data with attendance summary
+    const summaryWithOvertime = summary.map(record => {
+      // userId is stored as ObjectId in the aggregation result
+      const userId = record.userId?.toString() || record.userId;
+      const totalOvertimeHours = overtimeMap.get(userId) || 0;
+      
+      // Remove userId from final output (not needed in response)
+      const { userId: _, ...recordWithoutUserId } = record;
+      
+      return {
+        ...recordWithoutUserId,
+        ot: totalOvertimeHours,
+        overtime: totalOvertimeHours,
+        overtimeHours: totalOvertimeHours
+      };
+    });
+
+    // Also include users who have overtime but no attendance records
+    const usersWithOvertimeOnly = Array.from(overtimeMap.keys())
+      .filter(userId => !summary.some(s => (s.userId?.toString() || s.userId) === userId))
+      .map(userId => {
+        // Fetch user details for users with only overtime
+        const userRecord = overtimeRecords.find(ot => (ot.user?.toString() || ot.user) === userId);
+        if (userRecord) {
+          return {
+            userId: userId,
+            user: {
+              userId: null, // Will need to populate from User model
+              name: null,
+              role: null,
+              designation: null
+            },
+            presentDays: 0,
+            absentDays: 0,
+            leaveDays: 0,
+            lateDays: 0,
+            ot: overtimeMap.get(userId) || 0,
+            overtime: overtimeMap.get(userId) || 0,
+            overtimeHours: overtimeMap.get(userId) || 0
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    // Populate user details for users with only overtime
+    if (usersWithOvertimeOnly.length > 0) {
+      const userIdsToPopulate = usersWithOvertimeOnly.map(u => u.userId);
+      const users = await User.find({ _id: { $in: userIdsToPopulate } }, 'name userId role designation').lean();
+      const userMap = new Map(users.map(u => [u._id.toString(), u]));
+      
+      usersWithOvertimeOnly.forEach(record => {
+        const user = userMap.get(record.userId);
+        if (user) {
+          record.user = {
+            userId: user.userId,
+            name: user.name,
+            role: user.role,
+            designation: user.designation
+          };
+        }
+      });
+      
+      summaryWithOvertime.push(...usersWithOvertimeOnly);
+    }
+
+    res.status(200).json({ success: true, count: summaryWithOvertime.length, data: summaryWithOvertime });
     
   } catch (err) {
      console.error(err);

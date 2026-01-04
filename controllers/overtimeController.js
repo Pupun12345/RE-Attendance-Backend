@@ -64,22 +64,64 @@ exports.rejectOvertime = async (req, res) => {
 exports.createOvertimeRequest = async (req, res) => {
   const { date, hours, reason, workerId } = req.body;
 
+  console.log('📝 Overtime Request Submission:');
+  console.log('   User Role:', req.user.role);
+  console.log('   User ID:', req.user.id);
+  console.log('   Request Body:', { date, hours, reason, workerId });
+
+  // Validation
+  if (!date) {
+    return res.status(400).json({ success: false, message: 'Date is required' });
+  }
+  if (!hours || hours <= 0) {
+    return res.status(400).json({ success: false, message: 'Valid hours (greater than 0) is required' });
+  }
+  if (!reason || reason.trim() === '') {
+    return res.status(400).json({ success: false, message: 'Reason is required' });
+  }
+
   try {
     let targetUserId = req.user.id;
 
+    // If workerId is provided and user is supervisor/management/admin, use workerId
     if (workerId && ['supervisor', 'management', 'admin'].includes(req.user.role)) {
       targetUserId = workerId;
+      console.log('   Using workerId for target user:', targetUserId);
+    } else {
+      console.log('   Using authenticated user ID:', targetUserId);
+    }
+
+    // Parse date if it's a string
+    let dateObj = date;
+    if (typeof date === 'string') {
+      dateObj = new Date(date);
+      if (isNaN(dateObj.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid date format' });
+      }
     }
 
     const record = await Overtime.create({
-      user: targetUserId, // Comes from 'protect' middleware
-      date,
-      hours,
-      reason,
+      user: targetUserId,
+      date: dateObj,
+      hours: parseFloat(hours),
+      reason: reason.trim(),
       status: 'pending' // Default status
     });
+
+    console.log('   ✅ Overtime record created:', record._id);
+
+    // Populate user info in response
+    await record.populate('user', 'name userId role');
+    
     res.status(201).json({ success: true, data: record });
   } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
+    console.error('   ❌ Error creating overtime record:', err);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    if (err.name === 'CastError') {
+      return res.status(400).json({ success: false, message: 'Invalid user ID or date format' });
+    }
+    res.status(500).json({ success: false, message: 'Server Error: ' + err.message });
   }
 };

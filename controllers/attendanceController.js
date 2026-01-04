@@ -64,7 +64,36 @@ function getStartOfDayIST(date) {
 }
 
 // --- 3.5. HELPER: Parse Location Data ---
-function parseLocation(location) {
+// This function can accept location as:
+// 1. An object: { longitude, latitude, address } or { lng, lat, address }
+// 2. A JSON string
+// 3. A string in format "lat,lng"
+// 4. Or it can extract from req.body directly if location is not provided
+function parseLocation(location, reqBody = null) {
+  // If location is undefined or null, try to construct from req.body fields
+  if (!location && reqBody) {
+    const lat = reqBody.lat || reqBody.latitude;
+    const lng = reqBody.lng || reqBody.longitude;
+    const address = reqBody.address || reqBody.location;
+    
+    if (lat && lng) {
+      return {
+        longitude: String(lng),
+        latitude: String(lat),
+        address: address || null
+      };
+    }
+    // If only address is provided, return it
+    if (address && address.trim() !== '') {
+      return {
+        longitude: null,
+        latitude: null,
+        address: address
+      };
+    }
+    return null;
+  }
+  
   // If location is undefined or null, return null
   if (!location) {
     return null;
@@ -84,6 +113,19 @@ function parseLocation(location) {
   if (typeof location === 'string') {
     // Handle empty string
     if (location.trim() === '') {
+      // Try to get from reqBody if available
+      if (reqBody) {
+        const lat = reqBody.lat || reqBody.latitude;
+        const lng = reqBody.lng || reqBody.longitude;
+        const address = reqBody.address;
+        if (lat && lng) {
+          return {
+            longitude: String(lng),
+            latitude: String(lat),
+            address: address || null
+          };
+        }
+      }
       return null;
     }
     try {
@@ -104,7 +146,15 @@ function parseLocation(location) {
         return {
           longitude: coordsMatch[2],
           latitude: coordsMatch[1],
-          address: null
+          address: reqBody?.address || null
+        };
+      }
+      // If it's just an address string, return it
+      if (location.trim().length > 0) {
+        return {
+          longitude: reqBody?.lng || reqBody?.longitude || null,
+          latitude: reqBody?.lat || reqBody?.latitude || null,
+          address: location
         };
       }
       return null;
@@ -117,7 +167,7 @@ function parseLocation(location) {
 // --- 4. HELPER: Compare Faces (AWS Rekognition) ---
 async function verifyFace(sourceImageUrl, targetImageUrl) {
   // DEBUG: Bypass face verification
-  const BYPASS_FACE_VERIFICATION = true; // Set to false to re-enable
+  const BYPASS_FACE_VERIFICATION = false; // Set to false to re-enable
   if (BYPASS_FACE_VERIFICATION) {
     console.log('⚠️  Face verification BYPASSED for debugging');
     return true;
@@ -202,8 +252,14 @@ exports.supervisorCheckInWorker = async (req, res) => {
       console.warn('⚠️  Face verification SKIPPED (temporarily disabled for testing)');
     }
 
-    const parsedLocation = parseLocation(location);
+    const parsedLocation = parseLocation(location, req.body);
     console.log('   Location (parsed):', parsedLocation);
+    console.log('   req.body fields:', { 
+      location: req.body.location, 
+      lat: req.body.lat, 
+      lng: req.body.lng, 
+      address: req.body.address 
+    });
 
     record = await Attendance.create({
       user: workerId,
@@ -295,10 +351,16 @@ exports.supervisorCheckOutWorker = async (req, res) => {
     }
 
     // Update record
-    const parsedCheckOutLocation = parseLocation(location);
+    const parsedCheckOutLocation = parseLocation(location, req.body);
     console.log('   Check-out Location (parsed):', parsedCheckOutLocation);
     console.log('   Location from req.body:', location);
     console.log('   Location type:', typeof location);
+    console.log('   req.body fields:', { 
+      location: req.body.location, 
+      lat: req.body.lat, 
+      lng: req.body.lng, 
+      address: req.body.address 
+    });
     
     record.checkOutTime = new Date();
     record.checkOutLocation = parsedCheckOutLocation;
@@ -341,7 +403,7 @@ exports.supervisorCreatePendingCheckIn = async (req, res) => {
       date: attendanceDateIST,
       status: 'pending', // IMPORTANT: Goes to Admin Pending Queue
       checkInTime: attendanceDate,
-      checkInLocation: parseLocation(location),
+      checkInLocation: parseLocation(location, req.body),
       checkInSelfie: req.file.path, 
       notes: `Offline Sync by Supervisor: ${req.user.name}`
     });
@@ -379,7 +441,7 @@ exports.supervisorCreatePendingCheckOut = async (req, res) => {
     if (record) {
       // Existing record update, set status to pending for approval
       record.checkOutTime = attendanceDate;
-      record.checkOutLocation = parseLocation(location);
+      record.checkOutLocation = parseLocation(location, req.body);
       record.checkOutSelfie = req.file.path;
       record.status = 'pending'; 
       record.notes = (record.notes || "") + ` | Offline Out Sync by ${req.user.name}`;
@@ -391,7 +453,7 @@ exports.supervisorCreatePendingCheckOut = async (req, res) => {
         date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
-        checkOutLocation: parseLocation(location),
+        checkOutLocation: parseLocation(location, req.body),
         checkOutSelfie: req.file.path,
         notes: `Offline Out (No CheckIn Found) by Supervisor: ${req.user.name}`
       });
@@ -426,7 +488,7 @@ exports.selfCreatePendingCheckIn = async (req, res) => {
       date: attendanceDateIST,
       status: 'pending', // <--- Goes to Admin Queue
       checkInTime: attendanceDate,
-      checkInLocation: parseLocation(location),
+      checkInLocation: parseLocation(location, req.body),
       checkInSelfie: req.file.path, 
       notes: `Offline Self-Sync: ${req.user.name}`
     });
@@ -458,7 +520,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
 
     if (record) {
       record.checkOutTime = attendanceDate;
-      record.checkOutLocation = parseLocation(location);
+      record.checkOutLocation = parseLocation(location, req.body);
       record.checkOutSelfie = req.file.path;
       record.status = 'pending'; // Set to pending for Admin review
       record.notes = (record.notes || "") + ` | Offline Self-Out Sync`;
@@ -470,7 +532,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
         date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
-        checkOutLocation: parseLocation(location),
+        checkOutLocation: parseLocation(location, req.body),
         checkOutSelfie: req.file.path,
         notes: `Offline Self-Out (No CheckIn found)`
       });
@@ -502,7 +564,7 @@ exports.selfCreatePendingCheckIn = async (req, res) => {
       date: attendanceDateIST,
       status: 'pending', // <--- Goes to Admin Queue
       checkInTime: attendanceDate,
-      checkInLocation: parseLocation(location),
+      checkInLocation: parseLocation(location, req.body),
       checkInSelfie: req.file.path, 
       notes: `Offline Self-Sync: ${req.user.name}`
     });
@@ -534,7 +596,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
 
     if (record) {
       record.checkOutTime = attendanceDate;
-      record.checkOutLocation = parseLocation(location);
+      record.checkOutLocation = parseLocation(location, req.body);
       record.checkOutSelfie = req.file.path;
       record.status = 'pending'; // Set to pending for Admin review
       record.notes = (record.notes || "") + ` | Offline Self-Out Sync`;
@@ -546,7 +608,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
         date: startOfDay,
         status: 'pending',
         checkOutTime: attendanceDate,
-        checkOutLocation: parseLocation(location),
+        checkOutLocation: parseLocation(location, req.body),
         checkOutSelfie: req.file.path,
         notes: `Offline Self-Out (No CheckIn found)`
       });
@@ -601,7 +663,7 @@ exports.selfCheckIn = async (req, res) => {
       date: today,
       status: 'present',
       checkInTime: new Date(),
-      checkInLocation: parseLocation(location),
+      checkInLocation: parseLocation(location, req.body),
       checkInSelfie: req.file.path,
       notes: 'Self check-in'
     });
@@ -644,7 +706,7 @@ exports.selfCheckOut = async (req, res) => {
     }
 
     record.checkOutTime = new Date();
-    record.checkOutLocation = parseLocation(location);
+    record.checkOutLocation = parseLocation(location, req.body);
     record.checkOutSelfie = req.file.path;
     await record.save();
 

@@ -21,6 +21,7 @@ const overtimeRoutes = require('./routes/overtime');
 const reportRoutes = require('./routes/reports');
 const setupRoutes = require('./routes/setup');
 const dataExportRoutes = require('./routes/dataExport');
+const emailRoutes = require('./routes/emails');
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use('/api/v1/overtime', overtimeRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/setup', setupRoutes);
 app.use('/api/v1/export', dataExportRoutes);
+app.use('/api/v1/emails', emailRoutes);
 
 // Simple test route
 app.get('/', (req, res) => {
@@ -52,20 +54,9 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-}).on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use!`);
-    console.log(`\n💡 To fix this, run one of these commands:`);
-    console.log(`   Option 1: Kill the process using port ${PORT}`);
-    console.log(`   lsof -ti:${PORT} | xargs kill -9`);
-    console.log(`\n   Option 2: Use a different port`);
-    console.log(`   PORT=5000 npm run dev`);
-    console.log(`\n   Option 3: Find and kill manually`);
-    console.log(`   lsof -i:${PORT}`);
-    process.exit(1);
-  } else {
-    throw err;
-  }
-});
+
+
+app.listen(
+  PORT,
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`)
+);

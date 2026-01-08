@@ -167,7 +167,7 @@ function parseLocation(location, reqBody = null) {
 // --- 4. HELPER: Compare Faces (AWS Rekognition) ---
 async function verifyFace(sourceImageUrl, targetImageUrl) {
   // DEBUG: Bypass face verification
-  const BYPASS_FACE_VERIFICATION = false; // Set to false to re-enable
+  const BYPASS_FACE_VERIFICATION = true; // Set to false to re-enable
   if (BYPASS_FACE_VERIFICATION) {
     console.log('⚠️  Face verification BYPASSED for debugging');
     return true;

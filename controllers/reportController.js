@@ -3,6 +3,16 @@ const Attendance = require('../models/Attendance');
 const Complaint = require('../models/Complaint');
 const Overtime = require('../models/Overtime');
 const User = require('../models/User');
+const Holiday = require('../models/Holiday');
+
+// Helper function to get date-only string (YYYY-MM-DD) from a date object
+// Normalizes to IST timezone for consistent date comparison
+const getDateOnlyString = (date) => {
+  if (!date) return null;
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
+  const dateIST = new Date(date.getTime() + IST_OFFSET_MS);
+  return dateIST.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+};
 
 // @desc    Get Daily Attendance Report
 // @route   GET /api/v1/reports/attendance/daily
@@ -19,10 +29,15 @@ exports.getDailyAttendance = async (req, res) => {
   
   // Parse dates as IST - JavaScript automatically converts to UTC internally
   // Dec 28 00:00 IST becomes Dec 27 18:30 UTC internally
+  // Use start of day and end of day to cover entire date range
   const startIST = new Date(startDate + 'T00:00:00.000+05:30');
   const endIST = new Date(endDate + 'T23:59:59.999+05:30');
   
-  // Use directly for MongoDB query (already in UTC internally)
+  // Get date-only strings for comparison (prevents day rollover issues)
+  const startDateStr = getDateOnlyString(startIST);
+  const endDateStr = getDateOnlyString(endIST);
+  
+  // Use date range for MongoDB query (covers entire days)
   const start = startIST;
   const end = endIST;
 
@@ -54,6 +69,64 @@ exports.getDailyAttendance = async (req, res) => {
       .sort({ date: -1, user: 1 })
       .lean();
 
+    // Fetch holidays in the date range
+    console.log('📅 [Daily Report] Fetching holidays with query:', {
+      date: { $gte: start.toISOString(), $lte: end.toISOString() },
+      startDateStr,
+      endDateStr
+    });
+    
+    const holidays = await Holiday.find({
+      date: { $gte: start, $lte: end }
+    }).lean();
+    
+    console.log('📅 [Daily Report] Holidays query result:');
+    console.log('  - Total records returned from DB:', holidays.length);
+    console.log('  - Holiday records:', holidays.map(h => ({
+      _id: h._id,
+      name: h.name,
+      date: h.date,
+      dateISO: h.date?.toISOString(),
+      type: h.type
+    })));
+
+    // Create a Set of holiday dates (normalized to date-only strings) for quick lookup
+    // Filter to only include holidays within the date range using date-only comparison
+    // Use a Set to ensure we only count unique dates, not duplicate records
+    const holidayDateSet = new Set();
+    const seenHolidayIds = new Set(); // Track holiday IDs to prevent counting duplicates
+    
+    holidays.forEach((holiday, index) => {
+      console.log(`📅 [Daily Report] Processing holiday ${index + 1}:`, {
+        _id: holiday._id,
+        name: holiday.name,
+        date: holiday.date?.toISOString(),
+        dateStr: getDateOnlyString(holiday.date)
+      });
+      
+      // Skip if we've already processed this holiday ID (prevent duplicate counting)
+      const holidayId = holiday._id?.toString() || holiday._id;
+      if (seenHolidayIds.has(holidayId)) {
+        console.log(`  ⚠️  Skipping duplicate holiday ID: ${holidayId}`);
+        return; // Skip duplicate holiday records
+      }
+      seenHolidayIds.add(holidayId);
+      
+      const dateStr = getDateOnlyString(holiday.date);
+      // Only include holidays within the date range (date-only comparison)
+      if (dateStr && dateStr >= startDateStr && dateStr <= endDateStr) {
+        holidayDateSet.add(dateStr);
+        console.log(`  ✅ Added to holidayDateSet: ${dateStr}`);
+      } else {
+        console.log(`  ❌ Holiday date ${dateStr} is outside range [${startDateStr}, ${endDateStr}]`);
+      }
+    });
+    
+    console.log('📅 [Daily Report] Holiday processing summary:');
+    console.log('  - Unique holiday IDs seen:', seenHolidayIds.size);
+    console.log('  - Unique holiday dates in set:', holidayDateSet.size);
+    console.log('  - Holiday dates in set:', Array.from(holidayDateSet));
+
     // Fetch overtime records for the date range (include pending and approved, exclude rejected)
     const overtimeRecords = await Overtime.find({
       date: { $gte: start, $lte: end },
@@ -61,39 +134,48 @@ exports.getDailyAttendance = async (req, res) => {
     }).lean();
 
     // Create a map of user+date -> overtime hours for quick lookup
-    // Normalize dates to IST for matching
+    // Use date-only strings for matching (prevents day rollover)
+    // Filter to only include records within the date range using date-only comparison
     const overtimeMap = new Map();
     overtimeRecords.forEach(ot => {
       const userId = ot.user?.toString() || ot.user;
-      // Convert UTC date to IST for matching
-      const otDateIST = new Date(ot.date.getTime() + IST_OFFSET_MS);
-      const dateStr = otDateIST.toISOString().split('T')[0];
-      const dateKey = `${userId}_${dateStr}`;
-      overtimeMap.set(dateKey, ot.hours);
-      
-      // Debug logging (can be removed in production)
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`📊 Overtime mapping: userId=${userId}, date=${dateStr}, hours=${ot.hours}, status=${ot.status}, key=${dateKey}`);
+      const dateStr = getDateOnlyString(ot.date);
+      // Only include records within the date range (date-only comparison)
+      if (dateStr && userId && dateStr >= startDateStr && dateStr <= endDateStr) {
+        const dateKey = `${userId}_${dateStr}`;
+        overtimeMap.set(dateKey, ot.hours);
+        
+        // Debug logging (can be removed in production)
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`📊 Overtime mapping: userId=${userId}, date=${dateStr}, hours=${ot.hours}, status=${ot.status}, key=${dateKey}`);
+        }
       }
     });
 
     // Create a map of user+date -> attendance record for quick lookup
-    // Normalize dates to IST for matching
+    // Use date-only strings for matching (prevents day rollover)
+    // Filter to only include records within the date range using date-only comparison
     const attendanceMap = new Map();
     attendanceRecords.forEach(record => {
       const userId = record.user?._id?.toString() || record.user?.toString() || record.user;
-      // Convert UTC date to IST for matching
-      const recordDateIST = new Date(record.date.getTime() + IST_OFFSET_MS);
-      const dateStr = recordDateIST.toISOString().split('T')[0];
-      const dateKey = `${userId}_${dateStr}`;
-      attendanceMap.set(dateKey, record);
+      const dateStr = getDateOnlyString(record.date);
+      // Only include records within the date range (date-only comparison)
+      if (dateStr && userId && dateStr >= startDateStr && dateStr <= endDateStr) {
+        const dateKey = `${userId}_${dateStr}`;
+        attendanceMap.set(dateKey, record);
+      }
     });
 
-    // Generate all dates in the range (in IST)
-    // Create dates in IST and convert to UTC for storage, but use IST date string for matching
+    // Generate all dates in the range using date-only comparison
+    // Compare dates as strings to prevent day rollover issues
     const dates = [];
     const currentDate = new Date(startIST);
-    while (currentDate <= endIST) {
+    const endDateOnly = getDateOnlyString(endIST);
+    
+    while (true) {
+      const currentDateStr = getDateOnlyString(currentDate);
+      if (!currentDateStr || currentDateStr > endDateStr) break;
+      
       dates.push(new Date(currentDate));
       currentDate.setDate(currentDate.getDate() + 1);
     }
@@ -103,11 +185,15 @@ exports.getDailyAttendance = async (req, res) => {
     
     for (const user of allUsers) {
       for (const date of dates) {
-        // Convert UTC date to IST for date string matching
-        const dateIST = new Date(date.getTime() + IST_OFFSET_MS);
-        const dateStr = dateIST.toISOString().split('T')[0];
+        // Use date-only string for matching (prevents day rollover)
+        const dateStr = getDateOnlyString(date);
+        if (!dateStr) continue;
+        
         const dateKey = `${user._id.toString()}_${dateStr}`;
         const overtimeHours = overtimeMap.get(dateKey) || 0;
+        
+        // Check if this date is a holiday - exclude holidays from absent calculation
+        const isHoliday = holidayDateSet.has(dateStr);
         
         const existingRecord = attendanceMap.get(dateKey);
         
@@ -156,8 +242,9 @@ exports.getDailyAttendance = async (req, res) => {
             overtime: overtimeHours,
             overtimeHours: overtimeHours
           });
-        } else {
+        } else if (!isHoliday) {
           // User is absent for this date - create absent record
+          // Only create absent record if the date is NOT a holiday
           allRecords.push({
             _id: null,
             user: {
@@ -188,6 +275,8 @@ exports.getDailyAttendance = async (req, res) => {
             updatedAt: null
           });
         }
+        // If isHoliday is true and no existingRecord, we skip creating any record
+        // Holidays are not considered as absent days
       }
     }
 
@@ -215,7 +304,16 @@ exports.getDailyAttendance = async (req, res) => {
       return (a.user?.name || '').localeCompare(b.user?.name || '');
     });
     
-    res.status(200).json({ success: true, count: allRecords.length, data: allRecords });
+    // Get holidays count from database - simply count the number of holiday entries
+    const holidaysCount = holidays.length;
+    console.log('📅 [Daily Report] Final holidaysCount:', holidaysCount);
+    
+    res.status(200).json({ 
+      success: true, 
+      count: allRecords.length, 
+      holidaysCount: holidaysCount,
+      data: allRecords 
+    });
 
   } catch (err) {
     console.error(err);
@@ -243,7 +341,11 @@ exports.getMonthlySummary = async (req, res) => {
   const startIST = new Date(startDate + 'T00:00:00.000+05:30');
   const endIST = new Date(endDate + 'T23:59:59.999+05:30');
   
-  // Use directly for MongoDB query (already in UTC internally)
+  // Get date-only strings for comparison (prevents day rollover issues)
+  const startDateStr = getDateOnlyString(startIST);
+  const endDateStr = getDateOnlyString(endIST);
+  
+  // Use date range for MongoDB query (covers entire days)
   const start = startIST;
   const end = endIST;
 
@@ -257,6 +359,96 @@ exports.getMonthlySummary = async (req, res) => {
   });
 
   try {
+    // Get all active users (workers, supervisors, management) for role-based filtering
+    const userQuery = { isActive: true };
+    if (req.user.role === 'supervisor') {
+      // Supervisors can only see their own records
+      userQuery._id = req.user._id;
+    } else {
+      // Admin/Management can see all roles
+      userQuery.role = { $in: ['worker', 'supervisor', 'management'] };
+    }
+    
+    const allUsers = await User.find(userQuery, 'name userId role designation').lean();
+
+    // Fetch holidays in the date range
+    console.log('📅 Fetching holidays with query:', {
+      date: { $gte: start.toISOString(), $lte: end.toISOString() },
+      startDateStr,
+      endDateStr
+    });
+    
+    const holidays = await Holiday.find({
+      date: { $gte: start, $lte: end }
+    }).lean();
+    
+    console.log('📅 Holidays query result:');
+    console.log('  - Total records returned from DB:', holidays.length);
+    console.log('  - Holiday records:', holidays.map(h => ({
+      _id: h._id,
+      name: h.name,
+      date: h.date,
+      dateISO: h.date?.toISOString(),
+      type: h.type
+    })));
+
+    // Create a Set of holiday dates (normalized to date-only strings) for quick lookup
+    // Filter to only include holidays within the date range using date-only comparison
+    // Use a Set to ensure we only count unique dates, not duplicate records
+    const holidayDateSet = new Set();
+    const seenHolidayIds = new Set(); // Track holiday IDs to prevent counting duplicates
+    
+    holidays.forEach((holiday, index) => {
+      console.log(`📅 Processing holiday ${index + 1}:`, {
+        _id: holiday._id,
+        name: holiday.name,
+        date: holiday.date?.toISOString(),
+        dateStr: getDateOnlyString(holiday.date)
+      });
+      
+      // Skip if we've already processed this holiday ID (prevent duplicate counting)
+      const holidayId = holiday._id?.toString() || holiday._id;
+      if (seenHolidayIds.has(holidayId)) {
+        console.log(`  ⚠️  Skipping duplicate holiday ID: ${holidayId}`);
+        return; // Skip duplicate holiday records
+      }
+      seenHolidayIds.add(holidayId);
+      
+      const dateStr = getDateOnlyString(holiday.date);
+      // Only include holidays within the date range (date-only comparison)
+      if (dateStr && dateStr >= startDateStr && dateStr <= endDateStr) {
+        holidayDateSet.add(dateStr);
+        console.log(`  ✅ Added to holidayDateSet: ${dateStr}`);
+      } else {
+        console.log(`  ❌ Holiday date ${dateStr} is outside range [${startDateStr}, ${endDateStr}]`);
+      }
+    });
+    
+    console.log('📅 Holiday processing summary:');
+    console.log('  - Unique holiday IDs seen:', seenHolidayIds.size);
+    console.log('  - Unique holiday dates in set:', holidayDateSet.size);
+    console.log('  - Holiday dates in set:', Array.from(holidayDateSet));
+    
+    // Get holidays count from database - simply count the number of holiday entries
+    const holidaysCount = holidays.length;
+    console.log('📅 Final holidaysCount:', holidaysCount);
+
+    // Calculate total working days (excluding holidays) in the date range
+    // Use date-only comparison to prevent day rollover
+    const totalWorkingDays = [];
+    const currentDate = new Date(startIST);
+    
+    while (true) {
+      const currentDateStr = getDateOnlyString(currentDate);
+      if (!currentDateStr || currentDateStr > endDateStr) break;
+      
+      if (!holidayDateSet.has(currentDateStr)) {
+        totalWorkingDays.push(currentDateStr);
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    const totalWorkingDaysCount = totalWorkingDays.length;
+
     // Get attendance summary
     const summary = await Attendance.aggregate([
       { $match: { date: { $gte: start, $lte: end } } },
@@ -321,38 +513,76 @@ exports.getMonthlySummary = async (req, res) => {
       status: { $in: ['pending', 'approved'] }
     }).lean();
 
+    // Debug: Log overtime records to check for duplicates
+    console.log('📊 Overtime records found:', overtimeRecords.length);
+    if (process.env.NODE_ENV !== 'production') {
+      overtimeRecords.forEach((ot, idx) => {
+        console.log(`  OT ${idx + 1}: userId=${ot.user}, date=${ot.date?.toISOString()}, hours=${ot.hours}, status=${ot.status}, _id=${ot._id}`);
+      });
+    }
+
     // Calculate total overtime hours per user
+    // Accumulate raw values first, then round when retrieving to avoid precision issues
     const overtimeMap = new Map();
     overtimeRecords.forEach(ot => {
       const userId = ot.user?.toString() || ot.user;
       const currentHours = overtimeMap.get(userId) || 0;
+      // Accumulate raw values without rounding to maintain accuracy
       overtimeMap.set(userId, currentHours + ot.hours);
     });
+    
+    // Debug: Log accumulated overtime totals
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('📊 Accumulated overtime totals:');
+      overtimeMap.forEach((hours, userId) => {
+        console.log(`  User ${userId}: ${hours} hours (raw), ${Math.round(hours)} hours (rounded)`);
+      });
+    }
 
-    // Join overtime data with attendance summary
+    // Track userIds that are already in the summary to avoid duplicates
+    const userIdsInSummary = new Set();
+    
+    // Join overtime data with attendance summary and recalculate absent days
     const summaryWithOvertime = summary.map(record => {
       // userId is stored as ObjectId in the aggregation result
       const userId = record.userId?.toString() || record.userId;
-      const totalOvertimeHours = overtimeMap.get(userId) || 0;
+      userIdsInSummary.add(userId); // Track this userId
+      const totalOvertimeHours = Math.round(overtimeMap.get(userId) || 0);
+      
+      // Recalculate absent days: total working days - present - leave - late
+      // This ensures holidays are excluded and we count actual absent days correctly
+      const presentDays = record.presentDays || 0;
+      const leaveDays = record.leaveDays || 0;
+      const lateDays = record.lateDays || 0;
+      // Late days are considered as present, so we include them in the calculation
+      const actualPresentDays = presentDays + lateDays;
+      const recalculatedAbsentDays = Math.max(0, totalWorkingDaysCount - actualPresentDays - leaveDays);
       
       // Remove userId from final output (not needed in response)
       const { userId: _, ...recordWithoutUserId } = record;
       
       return {
         ...recordWithoutUserId,
-        ot: totalOvertimeHours,
-        overtime: totalOvertimeHours,
-        overtimeHours: totalOvertimeHours
+        presentDays: actualPresentDays, // Include late days as present
+        absentDays: recalculatedAbsentDays, // Recalculated excluding holidays
+        leaveDays: leaveDays,
+        lateDays: lateDays,
+        ot: totalOvertimeHours, // Rounded to whole number
+        overtime: totalOvertimeHours, // Rounded to whole number
+        overtimeHours: totalOvertimeHours // Rounded to whole number
       };
     });
 
     // Also include users who have overtime but no attendance records
+    // For these users, all working days are considered absent (excluding holidays)
     const usersWithOvertimeOnly = Array.from(overtimeMap.keys())
-      .filter(userId => !summary.some(s => (s.userId?.toString() || s.userId) === userId))
+      .filter(userId => !userIdsInSummary.has(userId))
       .map(userId => {
+        userIdsInSummary.add(userId); // Track this userId
         // Fetch user details for users with only overtime
         const userRecord = overtimeRecords.find(ot => (ot.user?.toString() || ot.user) === userId);
         if (userRecord) {
+          const userOvertimeHours = Math.round(overtimeMap.get(userId) || 0);
           return {
             userId: userId,
             user: {
@@ -362,12 +592,12 @@ exports.getMonthlySummary = async (req, res) => {
               designation: null
             },
             presentDays: 0,
-            absentDays: 0,
+            absentDays: totalWorkingDaysCount, // All working days are absent (holidays excluded)
             leaveDays: 0,
             lateDays: 0,
-            ot: overtimeMap.get(userId) || 0,
-            overtime: overtimeMap.get(userId) || 0,
-            overtimeHours: overtimeMap.get(userId) || 0
+            ot: userOvertimeHours, // Rounded to whole number
+            overtime: userOvertimeHours, // Rounded to whole number
+            overtimeHours: userOvertimeHours // Rounded to whole number
           };
         }
         return null;
@@ -395,7 +625,34 @@ exports.getMonthlySummary = async (req, res) => {
       summaryWithOvertime.push(...usersWithOvertimeOnly);
     }
 
-    res.status(200).json({ success: true, count: summaryWithOvertime.length, data: summaryWithOvertime });
+    // Also include all active users who have no attendance or overtime records
+    // For these users, all working days are considered absent (excluding holidays)
+    const usersWithNoRecords = allUsers
+      .filter(user => !userIdsInSummary.has(user._id.toString()))
+      .map(user => ({
+        user: {
+          userId: user.userId,
+          name: user.name,
+          role: user.role,
+          designation: user.designation
+        },
+        presentDays: 0,
+        absentDays: totalWorkingDaysCount, // All working days are absent (holidays excluded)
+        leaveDays: 0,
+        lateDays: 0,
+        ot: 0,
+        overtime: 0,
+        overtimeHours: 0
+      }));
+    
+    summaryWithOvertime.push(...usersWithNoRecords);
+
+    res.status(200).json({ 
+      success: true, 
+      count: summaryWithOvertime.length, 
+      holidaysCount: holidaysCount,
+      data: summaryWithOvertime 
+    });
     
   } catch (err) {
      console.error(err);

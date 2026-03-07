@@ -1,0 +1,5 @@
+config/gcs-key.json
+node_modules/
+.env
+**/.env
+**/.vs/

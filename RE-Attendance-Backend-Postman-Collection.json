@@ -1,0 +1,1076 @@
+{
+  "info": {
+    "name": "RE-Attendance Backend API",
+    "description": "Comprehensive API collection for SmartCare RE Attendance Backend system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "Create Admin User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/setup/admin",
+              "host": ["{{baseUrl}}"],
+              "path": ["setup", "admin"]
+            },
+            "description": "Creates the default admin user with credentials: admin@example.com / password123"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.to.have.status(200)) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.success && response.token) {",
+                  "        pm.collectionVariables.set('token', response.token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@example.com\",\n    \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Login with email/password. Token is auto-saved to collection variables."
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgotpassword",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgotpassword"]
+            },
+            "description": "Send password reset email (currently not implemented)"
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"password\": \"newPassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/resetpassword/:token",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "resetpassword", ":token"],
+              "variable": [
+                {
+                  "key": "token",
+                  "value": "reset-token-here"
+                }
+              ]
+            },
+            "description": "Reset password with token (currently not implemented)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User Management",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users?role=worker",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "worker",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all users. Optional role filter: worker, supervisor, management, admin"
+          },
+          "response": []
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"John Doe\",\n    \"userId\": \"john001\",\n    \"phone\": \"1234567890\",\n    \"email\": \"john@example.com\",\n    \"password\": \"password123\",\n    \"role\": \"worker\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            },
+            "description": "Create new user. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Create User with Profile Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "Jane Smith",
+                  "type": "text"
+                },
+                {
+                  "key": "userId",
+                  "value": "jane002",
+                  "type": "text"
+                },
+                {
+                  "key": "phone",
+                  "value": "0987654321",
+                  "type": "text"
+                },
+                {
+                  "key": "email",
+                  "value": "jane@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "password123",
+                  "type": "text"
+                },
+                {
+                  "key": "role",
+                  "value": "supervisor",
+                  "type": "text"
+                },
+                {
+                  "key": "profileImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            },
+            "description": "Create user with profile image upload"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/:userId",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", ":userId"],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "user-id-here"
+                }
+              ]
+            },
+            "description": "Get single user details"
+          },
+          "response": []
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"John Doe Updated\",\n    \"phone\": \"1234567899\",\n    \"role\": \"supervisor\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/:userId",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", ":userId"],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "user-id-here"
+                }
+              ]
+            },
+            "description": "Update user details. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Update User with Base64 Image",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"John Doe Updated\",\n    \"profileImageBase64\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w...\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users/:userId",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", ":userId"],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "user-id-here"
+                }
+              ]
+            },
+            "description": "Update user with base64 encoded profile image"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete/Toggle User",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/:userId",
+              "host": ["{{baseUrl}}"],
+              "path": ["users", ":userId"],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "user-id-here"
+                }
+              ]
+            },
+            "description": "Soft delete - toggles user active status"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Attendance Management",
+      "item": [
+        {
+          "name": "Today's Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/summary/today",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "summary", "today"]
+            },
+            "description": "Get today's attendance summary. Admin/Management/Supervisor only."
+          },
+          "response": []
+        },
+        {
+          "name": "Supervisor Check-In Worker",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "workerId",
+                  "value": "worker-id-here",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Bangalore, India\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/supervisor/checkin",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "supervisor", "checkin"]
+            },
+            "description": "Supervisor checks in a worker with photo and location"
+          },
+          "response": []
+        },
+        {
+          "name": "Supervisor Check-Out Worker",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "workerId",
+                  "value": "worker-id-here",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Bangalore, India\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/supervisor/checkout",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "supervisor", "checkout"]
+            },
+            "description": "Supervisor checks out a worker with photo and location"
+          },
+          "response": []
+        },
+        {
+          "name": "Self Check-In",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Office Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/checkin",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "checkin"]
+            },
+            "description": "Self check-in for supervisor/management"
+          },
+          "response": []
+        },
+        {
+          "name": "Self Check-Out",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Office Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/checkout",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "checkout"]
+            },
+            "description": "Self check-out for supervisor/management"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pending Attendance",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "pending"]
+            },
+            "description": "Get all pending attendance requests. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Attendance",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/:attendanceId/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", ":attendanceId", "approve"],
+              "variable": [
+                {
+                  "key": "attendanceId",
+                  "value": "attendance-id-here"
+                }
+              ]
+            },
+            "description": "Approve pending attendance request"
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Attendance",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/:attendanceId/reject",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", ":attendanceId", "reject"],
+              "variable": [
+                {
+                  "key": "attendanceId",
+                  "value": "attendance-id-here"
+                }
+              ]
+            },
+            "description": "Reject pending attendance request"
+          },
+          "response": []
+        },
+        {
+          "name": "Daily Status Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/status/today",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "status", "today"]
+            },
+            "description": "Get today's status for supervisor view"
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Worker Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"workerId\": \"worker-id-here\",\n    \"status\": \"present\",\n    \"notes\": \"Manual attendance marking\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/mark",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "mark"]
+            },
+            "description": "Manually mark worker attendance"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Offline Attendance (Pending)",
+      "item": [
+        {
+          "name": "Supervisor Pending Check-In",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "workerId",
+                  "value": "worker-id-here",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Site Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/supervisor/checkin-pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "supervisor", "checkin-pending"]
+            },
+            "description": "Create pending check-in request (offline sync)"
+          },
+          "response": []
+        },
+        {
+          "name": "Supervisor Pending Check-Out",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "workerId",
+                  "value": "worker-id-here",
+                  "type": "text"
+                },
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Site Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/supervisor/checkout-pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "supervisor", "checkout-pending"]
+            },
+            "description": "Create pending check-out request (offline sync)"
+          },
+          "response": []
+        },
+        {
+          "name": "Self Pending Check-In",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Work Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/checkin-pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "checkin-pending"]
+            },
+            "description": "Create pending self check-in request (offline sync)"
+          },
+          "response": []
+        },
+        {
+          "name": "Self Pending Check-Out",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "location",
+                  "value": "{\"longitude\":\"77.5946\", \"latitude\":\"12.9716\", \"address\":\"Work Location\"}",
+                  "type": "text"
+                },
+                {
+                  "key": "attendanceImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendance/checkout-pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["attendance", "checkout-pending"]
+            },
+            "description": "Create pending self check-out request (offline sync)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Complaints",
+      "item": [
+        {
+          "name": "Get All Complaints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/complaints?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["complaints"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all complaints. Optional status filter: pending, in_progress, resolved"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Complaint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Equipment Issue\",\n    \"description\": \"The drilling machine is not working properly\",\n    \"workerId\": \"worker-id-here\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": ["{{baseUrl}}"],
+              "path": ["complaints"]
+            },
+            "description": "Create complaint. Supervisor/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Complaint with Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Safety Issue",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Unsafe working conditions at site",
+                  "type": "text"
+                },
+                {
+                  "key": "workerId",
+                  "value": "worker-id-here",
+                  "type": "text"
+                },
+                {
+                  "key": "complaintImage",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints",
+              "host": ["{{baseUrl}}"],
+              "path": ["complaints"]
+            },
+            "description": "Create complaint with image attachment"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Complaint Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"in_progress\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/complaints/:complaintId",
+              "host": ["{{baseUrl}}"],
+              "path": ["complaints", ":complaintId"],
+              "variable": [
+                {
+                  "key": "complaintId",
+                  "value": "complaint-id-here"
+                }
+              ]
+            },
+            "description": "Update complaint status. Admin/Management only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Holidays",
+      "item": [
+        {
+          "name": "Get All Holidays",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/holidays",
+              "host": ["{{baseUrl}}"],
+              "path": ["holidays"]
+            },
+            "description": "Get all holidays"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Holiday",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Independence Day\",\n    \"date\": \"2026-08-15\",\n    \"type\": \"national\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/holidays",
+              "host": ["{{baseUrl}}"],
+              "path": ["holidays"]
+            },
+            "description": "Create new holiday. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Holiday",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/holidays/:holidayId",
+              "host": ["{{baseUrl}}"],
+              "path": ["holidays", ":holidayId"],
+              "variable": [
+                {
+                  "key": "holidayId",
+                  "value": "holiday-id-here"
+                }
+              ]
+            },
+            "description": "Delete holiday. Admin/Management only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Overtime",
+      "item": [
+        {
+          "name": "Get All Overtime Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/overtime?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["overtime"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all overtime requests. Admin/Management only. Optional status filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Overtime Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"date\": \"2026-03-01\",\n    \"hours\": 2,\n    \"reason\": \"Emergency maintenance work\",\n    \"workerId\": \"worker-id-here\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/overtime",
+              "host": ["{{baseUrl}}"],
+              "path": ["overtime"]
+            },
+            "description": "Create overtime request. Can be self or for worker (if supervisor)."
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Overtime",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/overtime/:overtimeId/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["overtime", ":overtimeId", "approve"],
+              "variable": [
+                {
+                  "key": "overtimeId",
+                  "value": "overtime-id-here"
+                }
+              ]
+            },
+            "description": "Approve overtime request. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Overtime",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/overtime/:overtimeId/reject",
+              "host": ["{{baseUrl}}"],
+              "path": ["overtime", ":overtimeId", "reject"],
+              "variable": [
+                {
+                  "key": "overtimeId",
+                  "value": "overtime-id-here"
+                }
+              ]
+            },
+            "description": "Reject overtime request. Admin/Management only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Daily Attendance Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/attendance/daily?startDate=2026-03-01&endDate=2026-03-01",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "attendance", "daily"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2026-03-01"
+                }
+              ]
+            },
+            "description": "Get daily attendance report for date range"
+          },
+          "response": []
+        },
+        {
+          "name": "Monthly Attendance Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/attendance/monthly?startDate=2026-03-01&endDate=2026-03-31",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "attendance", "monthly"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2026-03-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2026-03-31"
+                }
+              ]
+            },
+            "description": "Get monthly attendance summary. Admin/Management only."
+          },
+          "response": []
+        },
+        {
+          "name": "Complaint Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/complaints",
+              "host": ["{{baseUrl}}"],
+              "path": ["reports", "complaints"]
+            },
+            "description": "Get complaint report. Admin/Management only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Data Export",
+      "item": [
+        {
+          "name": "Export All Production Data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/export/all?email=admin@example.com&password=password123",
+              "host": ["{{baseUrl}}"],
+              "path": ["export", "all"],
+              "query": [
+                {
+                  "key": "email",
+                  "value": "admin@example.com"
+                },
+                {
+                  "key": "password",
+                  "value": "password123"
+                }
+              ]
+            },
+            "description": "Export all production data in single JSON response. Admin only."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

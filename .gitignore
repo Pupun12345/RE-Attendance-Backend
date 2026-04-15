@@ -1,0 +1,8 @@
+config/gcs-key.json
+node_modules/
+.env
+**/.env
+**/.vs/
+/uploads/
+package-lock.json
+*.md

@@ -495,21 +495,94 @@ exports.getMonthlySummary = async (req, res) => {
     const totalWorkingDaysCount = totalWorkingDays.length;
 
     // Get attendance summary
+    // const summary = await Attendance.aggregate([
+    //   { $match: { date: { $gte: start, $lte: end } } },
+    //   {
+    //     $group: {
+    //       _id: "$user",
+    //       presentDays: {
+    //         $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] },
+    //       },
+    //       absentDays: {
+    //         $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] },
+    //       },
+    //       leaveDays: { $sum: { $cond: [{ $eq: ["$status", "leave"] }, 1, 0] } },
+    //       lateDays: { $sum: { $cond: [{ $eq: ["$status", "late"] }, 1, 0] } },
+    //     },
+    //   },
+    //   {
+    //     $lookup: {
+    //       from: "users",
+    //       localField: "_id",
+    //       foreignField: "_id",
+    //       as: "userDetails",
+    //     },
+    //   },
+    //   { $unwind: "$userDetails" },
+    //   {
+    //     $project: {
+    //       _id: 0,
+    //       userId: "$_id",
+    //       user: {
+    //         userId: "$userDetails.userId",
+    //         name: "$userDetails.name",
+    //         role: "$userDetails.role",
+    //         designation: "$userDetails.designation",
+    //       },
+    //       presentDays: 1,
+    //       absentDays: 1,
+    //       leaveDays: 1,
+    //       lateDays: 1,
+    //     },
+    //   },
+    // ]);
+
     const summary = await Attendance.aggregate([
-      { $match: { date: { $gte: start, $lte: end } } },
       {
-        $group: {
-          _id: "$user",
-          presentDays: {
-            $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] },
-          },
-          absentDays: {
-            $sum: { $cond: [{ $eq: ["$status", "absent"] }, 1, 0] },
-          },
-          leaveDays: { $sum: { $cond: [{ $eq: ["$status", "leave"] }, 1, 0] } },
-          lateDays: { $sum: { $cond: [{ $eq: ["$status", "late"] }, 1, 0] } },
+        $match: {
+          date: { $gte: start, $lte: end },
+          // user: { $in: allowedUserIds }, // if role filtering needed
         },
       },
+
+      // Step 1: deduplicate per user per day
+      {
+        $group: {
+          _id: {
+            user: "$user",
+            date: "$date",
+          },
+          status: { $first: "$status" },
+        },
+      },
+
+      // Step 2: aggregate totals per user
+      {
+        $group: {
+          _id: "$_id.user",
+          presentDays: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "present"] }, 1, 0],
+            },
+          },
+          absentDays: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "absent"] }, 1, 0],
+            },
+          },
+          leaveDays: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "leave"] }, 1, 0],
+            },
+          },
+          lateDays: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "late"] }, 1, 0],
+            },
+          },
+        },
+      },
+
       {
         $lookup: {
           from: "users",
@@ -518,7 +591,9 @@ exports.getMonthlySummary = async (req, res) => {
           as: "userDetails",
         },
       },
+
       { $unwind: "$userDetails" },
+
       {
         $project: {
           _id: 0,

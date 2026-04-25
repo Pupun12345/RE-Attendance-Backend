@@ -945,6 +945,7 @@ exports.selfCheckIn = async (req, res) => {
 
     if (record) {
       if (record.status === "present" && !record.checkOutTime) {
+        console.log("🚫 SELF CHECK-IN BLOCKED: Existing check-in without check-out");
         return res.status(400).json({
           success: false,
           message: "Already checked in. Please check out first.",
@@ -953,6 +954,7 @@ exports.selfCheckIn = async (req, res) => {
 
       // Case 2: Already completed check-in & check-out
       if (record.status === "present" && record.checkOutTime) {
+        console.log("🚫 SELF CHECK-IN BLOCKED: Attendance already completed for today");
         return res.status(400).json({
           success: false,
           message: "You have already completed attendance for today.",

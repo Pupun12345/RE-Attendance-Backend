@@ -49,7 +49,22 @@ exports.login = async (req, res) => {
   }
 };
 
+// The mobile app's "Forgot Password" dialog calls this. Password-reset email
+// delivery isn't wired up yet, so respond clearly instead of hanging forever
+// (the previous implementation was an empty handler that never sent a response).
+exports.forgotPassword = async (req, res) => {
+  res.status(501).json({
+    success: false,
+    message: 'Password reset is not available yet. Please contact your administrator.',
+  });
+};
 
+exports.resetPassword = async (req, res) => {
+  res.status(501).json({
+    success: false,
+    message: 'Password reset is not available yet. Please contact your administrator.',
+  });
+};
 
 const sendTokenResponse = async (user, statusCode, res) => {
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {

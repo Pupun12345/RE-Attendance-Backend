@@ -26,4 +26,7 @@ const overtimeSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+overtimeSchema.index({ user: 1, date: -1 });
+overtimeSchema.index({ status: 1 });
+
 module.exports = mongoose.model('Overtime', overtimeSchema);

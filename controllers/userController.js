@@ -1,9 +1,6 @@
 // controllers/userController.js
 const User = require('../models/User');
-const { Storage } = require('@google-cloud/storage');
-const path = require('path');
 const { bucket } = require('../config/initializeGCS');
-const fs = require('fs');
 
 // --- Helper function to generate a Signed URL ---
 const getSignedUrl = async (profileImageUrl) => {

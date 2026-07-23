@@ -43,4 +43,8 @@ const attendanceSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// Every attendance query filters by user+date or by status; index both.
+attendanceSchema.index({ user: 1, date: -1 });
+attendanceSchema.index({ status: 1, date: -1 });
+
 module.exports = mongoose.model('Attendance', attendanceSchema);

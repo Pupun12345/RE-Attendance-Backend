@@ -1,19 +1,6 @@
 // controllers/authController.js
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
-
-const path = require('path');
-
-
-const getSignedUrl = async (profileImageUrl) => {
-  if (!profileImageUrl) {
-    return null;
-  }
-
-  return profileImageUrl;
-};
 
 exports.login = async (req, res) => {
   const { email, password } = req.body;
@@ -24,39 +11,42 @@ exports.login = async (req, res) => {
       .json({ success: false, message: 'Please provide email and password' });
   }
 
-  const user = await User.findOne({
-    $or: [{ email: email }, { userId: email }],
-  }).select('+password');
+  try {
+    const user = await User.findOne({
+      $or: [{ email: email }, { userId: email }],
+    }).select('+password');
 
-  if (!user) {
-    return res
-      .status(401)
-      .json({ success: false, message: 'Invalid credentials' });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ success: false, message: 'Invalid credentials' });
+    }
+
+    const isMatch = await user.comparePassword(password);
+
+    if (!isMatch) {
+      return res
+        .status(401)
+        .json({ success: false, message: 'Invalid credentials' });
+    }
+
+    if (!user.isActive) {
+      return res
+        .status(403)
+        .json({ success: false, message: 'This account has been disabled' });
+    }
+
+    if (!['admin', 'management', 'supervisor'].includes(user.role)) {
+      return res
+        .status(403)
+        .json({ success: false, message: 'Login forbidden for this role' });
+    }
+
+    sendTokenResponse(user, 200, res);
+  } catch (err) {
+    console.error('Login Error:', err.message);
+    res.status(500).json({ success: false, message: 'Server Error' });
   }
-
-  const isMatch = await user.comparePassword(password);
-
-  if (!isMatch) {
-    return res
-      .status(401)
-      .json({ success: false, message: 'Invalid credentials' });
-  }
-
-  if (!['admin', 'management', 'supervisor'].includes(user.role)) {
-    return res
-      .status(403)
-      .json({ success: false, message: 'Login forbidden for this role' });
-  }
-
-  sendTokenResponse(user, 200, res);
-};
-
-
-exports.forgotPassword = async (req, res) => {
-  
-};
-exports.resetPassword = async (req, res) => {
-   
 };
 
 

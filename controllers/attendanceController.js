@@ -408,19 +408,6 @@ async function verifyFace(sourceImageUrl, targetImageUrl) {
 exports.supervisorCheckInWorker = async (req, res) => {
   const { workerId, location } = req.body;
 
-  console.log("🎯 SUPERVISOR CHECK-IN DEBUG:");
-  console.log("   Worker ID:", workerId);
-  console.log("   Location:", location);
-  console.log("   File received:", !!req.file);
-  if (req.file) {
-    console.log("   📸 Image Details:");
-    console.log("     - Original name:", req.file.originalname);
-    console.log("     - Size:", req.file.size, "bytes");
-    console.log("     - MIME type:", req.file.mimetype);
-    console.log("     - Saved path:", req.file.path);
-    console.log("     - File exists:", fs.existsSync(req.file.path));
-  }
-
   // Validation
   if (!workerId) {
     return res
@@ -432,17 +419,6 @@ exports.supervisorCheckInWorker = async (req, res) => {
     return res
       .status(400)
       .json({ success: false, message: "Photo is required" });
-  }
-
-  // Parse location if it's a JSON string
-  let parsedLocation = location;
-  if (typeof location === "string") {
-    try {
-      parsedLocation = JSON.parse(location);
-    } catch (e) {
-      // If it fails to parse, treat as plain string
-      parsedLocation = location;
-    }
   }
 
   const today = getTodayIST();
@@ -461,17 +437,10 @@ exports.supervisorCheckInWorker = async (req, res) => {
     }
 
     if (!worker) {
-      console.log("❌ Worker not found for ID:", workerId);
       return res
         .status(404)
         .json({ success: false, message: "Worker not found" });
     }
-
-    console.log("✅ Worker found:");
-    console.log("   - Name:", worker.name);
-    console.log("   - User ID:", worker.userId);
-    console.log("   - Profile Image URL:", worker.profileImageUrl);
-    console.log("   - Profile Image exists:", !!worker.profileImageUrl);
 
     // Most recent record check - use worker's actual ObjectId
     let record = await Attendance.findOne({
@@ -497,12 +466,7 @@ exports.supervisorCheckInWorker = async (req, res) => {
       }
     }
     // Face verification - MANDATORY for attendance approval
-    console.log("🔒 Face Verification is MANDATORY - starting process...");
-
     if (!worker.profileImageUrl) {
-      console.log(
-        "🚫 ATTENDANCE BLOCKED: Worker has no profile image for verification",
-      );
       return res.status(400).json({
         success: false,
         message:
@@ -511,22 +475,18 @@ exports.supervisorCheckInWorker = async (req, res) => {
     }
 
     if (!req.file.path) {
-      console.log("🚫 ATTENDANCE BLOCKED: No check-in image provided");
       return res.status(400).json({
         success: false,
         message: "Check-in photo is required for face verification.",
       });
     }
 
-    console.log("🔍 Starting AWS face verification - comparing images...");
     const verificationResult = await verifyFace(
       worker.profileImageUrl,
       req.file.path,
     );
 
     if (!verificationResult.success) {
-      console.log("🚫 ATTENDANCE BLOCKED: Face verification FAILED");
-      console.log("❌ Error:", verificationResult.error);
       return res.status(404).json({
         success: false,
         message:
@@ -535,18 +495,8 @@ exports.supervisorCheckInWorker = async (req, res) => {
       });
     }
 
-    console.log("🎉 ATTENDANCE APPROVED: Face verification PASSED");
-    console.log(
-      "✅ Face match confirmed - Similarity:",
-      verificationResult.similarity + "%",
-    );
-    console.log("✅ Face confidence:", verificationResult.confidence + "%");
-    console.log("✅ Proceeding with check-in...");
-
     const parsedLocation = parseLocation(location, req.body);
-    console.log("📍 Parsed location:", JSON.stringify(parsedLocation, null, 2));
 
-    console.log("💾 Creating attendance record...");
     record = await Attendance.create({
       user: worker._id, // Use worker's ObjectId for consistency
       date: today,
@@ -557,24 +507,9 @@ exports.supervisorCheckInWorker = async (req, res) => {
       notes: `Punch In by Supervisor: ${req.user.name}`,
     });
 
-    console.log("✅ Attendance record created with ID:", record._id);
-    console.log("📁 Upload file saved to:", req.file.path);
-
-    // Verify file was actually saved
-    try {
-      const stats = fs.statSync(req.file.path);
-      console.log("📊 Uploaded file info:");
-      console.log("   - File size on disk:", stats.size, "bytes");
-      console.log("   - Created at:", stats.birthtime);
-    } catch (fileErr) {
-      console.error("⚠️ Could not verify uploaded file:", fileErr.message);
-    }
-
-    // Reload record to ensure all fields are included
-    record = await Attendance.findById(record._id);
-
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Supervisor Check-In Error:", err.message);
     res.status(500).json({
       success: false,
       message: err.message || "Server Error during worker check-in",
@@ -645,15 +580,12 @@ exports.supervisorCheckOutWorker = async (req, res) => {
     // Face verification for supervisor checkout worker
     if (process.env.SKIP_FACE_VERIFICATION !== "true") {
       if (worker.profileImageUrl && req.file.path) {
-        console.log("🔍 Starting face verification for checkout...");
         const verificationResult = await verifyFace(
           worker.profileImageUrl,
           req.file.path,
         );
 
         if (!verificationResult.success) {
-          console.log("🚫 CHECKOUT BLOCKED: Face verification FAILED");
-          console.log("❌ Error:", verificationResult.error);
           return res.status(404).json({
             success: false,
             message:
@@ -661,12 +593,6 @@ exports.supervisorCheckOutWorker = async (req, res) => {
               "Face verification failed. Please try again with a clearer photo.",
           });
         }
-
-        console.log("✅ Checkout face verification PASSED");
-        console.log(
-          "✅ Face match confirmed - Similarity:",
-          verificationResult.similarity + "%",
-        );
       }
     }
 
@@ -682,11 +608,9 @@ exports.supervisorCheckOutWorker = async (req, res) => {
 
     await record.save();
 
-    // Reload record to ensure all fields are included
-    const savedRecord = await Attendance.findById(record._id);
-
-    res.status(200).json({ success: true, data: savedRecord });
+    res.status(200).json({ success: true, data: record });
   } catch (err) {
+    console.error("Supervisor Check-Out Error:", err.message);
     res.status(500).json({
       success: false,
       message: "Server Error during worker check-out",
@@ -740,6 +664,7 @@ exports.supervisorCreatePendingCheckIn = async (req, res) => {
 
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Supervisor Pending Check-In Error:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Server Error saving pending record" });
@@ -802,15 +727,12 @@ exports.supervisorCreatePendingCheckOut = async (req, res) => {
 
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Supervisor Pending Check-Out Error:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Server Error saving pending record" });
   }
 };
-
-// controllers/attendanceController.js
-
-// ... (Existing imports and functions) ...
 
 // 5. SELF ATTENDANCE: OFFLINE SYNC (PENDING)
 // This saves the record as 'pending' so Admin must approve it.
@@ -857,6 +779,7 @@ exports.selfCreatePendingCheckIn = async (req, res) => {
 
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Self Pending Check-In Error:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Server Error saving pending record" });
@@ -913,6 +836,7 @@ exports.selfCreatePendingCheckOut = async (req, res) => {
 
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Self Pending Check-Out Error:", err.message);
     res
       .status(500)
       .json({ success: false, message: "Server Error saving pending record" });
@@ -945,7 +869,6 @@ exports.selfCheckIn = async (req, res) => {
 
     if (record) {
       if (record.status === "present" && !record.checkOutTime) {
-        console.log("🚫 SELF CHECK-IN BLOCKED: Existing check-in without check-out");
         return res.status(400).json({
           success: false,
           message: "Already checked in. Please check out first.",
@@ -954,7 +877,6 @@ exports.selfCheckIn = async (req, res) => {
 
       // Case 2: Already completed check-in & check-out
       if (record.status === "present" && record.checkOutTime) {
-        console.log("🚫 SELF CHECK-IN BLOCKED: Attendance already completed for today");
         return res.status(400).json({
           success: false,
           message: "You have already completed attendance for today.",
@@ -965,15 +887,12 @@ exports.selfCheckIn = async (req, res) => {
     // Face verification for self check-in
     if (process.env.SKIP_FACE_VERIFICATION !== "true") {
       if (user.profileImageUrl && req.file.path) {
-        console.log("🔍 Starting face verification for self check-in...");
         const verificationResult = await verifyFace(
           user.profileImageUrl,
           req.file.path,
         );
 
         if (!verificationResult.success) {
-          console.log("🚫 SELF CHECK-IN BLOCKED: Face verification FAILED");
-          console.log("❌ Error:", verificationResult.error);
           return res.status(404).json({
             success: false,
             message:
@@ -981,12 +900,6 @@ exports.selfCheckIn = async (req, res) => {
               "Face verification failed. Please try again with a clearer photo.",
           });
         }
-
-        console.log("✅ Self check-in face verification PASSED");
-        console.log(
-          "✅ Face match confirmed - Similarity:",
-          verificationResult.similarity + "%",
-        );
       }
     }
 
@@ -1001,6 +914,7 @@ exports.selfCheckIn = async (req, res) => {
     });
     res.status(201).json({ success: true, data: record });
   } catch (err) {
+    console.error("Self Check-In Error:", err.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -1036,15 +950,12 @@ exports.selfCheckOut = async (req, res) => {
     if (process.env.SKIP_FACE_VERIFICATION !== "true") {
       const user = await User.findById(req.user.id);
       if (user.profileImageUrl && req.file.path) {
-        console.log("🔍 Starting face verification for self check-out...");
         const verificationResult = await verifyFace(
           user.profileImageUrl,
           req.file.path,
         );
 
         if (!verificationResult.success) {
-          console.log("🚫 SELF CHECK-OUT BLOCKED: Face verification FAILED");
-          console.log("❌ Error:", verificationResult.error);
           return res.status(404).json({
             success: false,
             message:
@@ -1052,12 +963,6 @@ exports.selfCheckOut = async (req, res) => {
               "Face verification failed. Please try again with a clearer photo.",
           });
         }
-
-        console.log("✅ Self check-out face verification PASSED");
-        console.log(
-          "✅ Face match confirmed - Similarity:",
-          verificationResult.similarity + "%",
-        );
       }
     }
 
@@ -1068,6 +973,7 @@ exports.selfCheckOut = async (req, res) => {
 
     res.status(200).json({ success: true, data: record });
   } catch (err) {
+    console.error("Self Check-Out Error:", err.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
@@ -1078,55 +984,48 @@ exports.getTodaySummary = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const presentStats = await Attendance.aggregate([
-      { $match: { date: { $gte: today, $lt: tomorrow } } },
-      {
-        $group: {
-          _id: "$user",
-          status: { $first: "$status" },
-        },
-      },
-    ]);
-
-    const absentCount = await User.countDocuments({
-      role: { $in: ["worker"] },
-      isActive: true,
-      _id: { $nin: presentStats.map((stat) => stat._id) },
-    });
-
-    const leaveCount = await Attendance.countDocuments({
-      date: { $gte: today, $lt: tomorrow },
-      status: "leave",
-    });
-
-    const rejectedCount = await Attendance.countDocuments({
-      date: { $gte: today, $lt: tomorrow },
-      status: "rejected",
-    });
-
-    const pendingCount = await Attendance.countDocuments({
-      date: { $gte: today, $lt: tomorrow },
-      status: "pending",
-    });
+    // These are independent of each other - run them in parallel instead of
+    // serially awaiting each one.
+    const [presentStats, leaveCount, rejectedCount, pendingCount, totalStaff] =
+      await Promise.all([
+        Attendance.aggregate([
+          { $match: { date: { $gte: today, $lt: tomorrow } } },
+          {
+            $group: {
+              _id: "$user",
+              status: { $first: "$status" },
+            },
+          },
+        ]),
+        Attendance.countDocuments({
+          date: { $gte: today, $lt: tomorrow },
+          status: "leave",
+        }),
+        Attendance.countDocuments({
+          date: { $gte: today, $lt: tomorrow },
+          status: "rejected",
+        }),
+        Attendance.countDocuments({
+          date: { $gte: today, $lt: tomorrow },
+          status: "pending",
+        }),
+        User.countDocuments({
+          role: { $in: ["worker", "supervisor", "management"] },
+          isActive: true,
+        }),
+      ]);
 
     const summary = {
       present: presentStats.length,
-      absent: absentCount,
+      absent: Math.max(0, totalStaff - presentStats.length - leaveCount),
       leave: leaveCount,
       pending: pendingCount,
       rejected: rejectedCount,
     };
 
-    const totalStaff = await User.countDocuments({
-      role: { $in: ["worker", "supervisor", "management"] },
-      isActive: true,
-    });
-
-    summary.absent = totalStaff - summary.present - summary.leave;
-    if (summary.absent < 0) summary.absent = 0;
-
     res.status(200).json({ success: true, data: summary });
   } catch (err) {
+    console.error("Get Today Summary Error:", err.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };

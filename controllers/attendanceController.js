@@ -9,6 +9,7 @@ const {
 const { bucket } = require("../config/initializeGCS");
 const path = require("path");
 const fs = require("fs");
+const { getTodayIST, toISTMidnight, formatDateIST, formatTimeIST } = require("../utils/istDate");
 
 // --- 1. INITIALIZE AWS REKOGNITION ---
 const rekognition = new RekognitionClient({
@@ -50,42 +51,10 @@ async function getImageBuffer(imageUrl) {
   }
 }
 
-// --- 3.4. HELPER: Get Today in IST (UTC+5:30) ---
-// Returns today's date at 00:00:00 IST (stored as UTC internally)
-function getTodayIST() {
-  const now = new Date();
-  // Get current time in IST (UTC+5:30)
-  const istOffset = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
-  const istTime = new Date(now.getTime() + istOffset);
-
-  // Get date string in IST (YYYY-MM-DD)
-  const year = istTime.getUTCFullYear();
-  const month = String(istTime.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(istTime.getUTCDate()).padStart(2, "0");
-  const istDateStr = `${year}-${month}-${day}`;
-
-  // Create date at 00:00:00 IST (which is 18:30:00 previous day UTC)
-  const todayIST = new Date(istDateStr + "T00:00:00.000+05:30");
-
-  return todayIST;
-}
-
-// --- 3.4.1. HELPER: Get Start of Day in IST for a given date ---
-// Converts any date to start of day (00:00:00) in IST
-function getStartOfDayIST(date) {
-  // Convert date to IST
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(date.getTime() + istOffset);
-
-  // Get date string in IST (YYYY-MM-DD)
-  const year = istTime.getUTCFullYear();
-  const month = String(istTime.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(istTime.getUTCDate()).padStart(2, "0");
-  const istDateStr = `${year}-${month}-${day}`;
-
-  // Create date at 00:00:00 IST
-  return new Date(istDateStr + "T00:00:00.000+05:30");
-}
+// getTodayIST() and getStartOfDayIST() now come from utils/istDate.js - the
+// same helpers reportController, holidayController, and overtimeController
+// use, so every part of the API agrees on what "today" and "that day" mean.
+const getStartOfDayIST = toISTMidnight;
 
 // --- 3.5. HELPER: Parse Location Data ---
 // This function can accept location as:

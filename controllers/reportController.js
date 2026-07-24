@@ -4,6 +4,7 @@ const Complaint = require("../models/Complaint");
 const Overtime = require("../models/Overtime");
 const User = require("../models/User");
 const Holiday = require("../models/Holiday");
+const { formatDateIST, formatTimeIST } = require("../utils/istDate");
 
 // Helper function to get date-only string (YYYY-MM-DD) from a date object
 // Normalizes to IST timezone for consistent date comparison
@@ -234,6 +235,12 @@ exports.getDailyAttendance = async (req, res) => {
             ot: overtimeHours,
             overtime: overtimeHours,
             overtimeHours: overtimeHours,
+            // Pre-formatted IST strings - use these for display instead of
+            // parsing/converting the raw date/checkInTime/checkOutTime on
+            // the client, so every screen agrees on India time.
+            dateDisplay: formatDateIST(existingRecord.date),
+            checkInTimeDisplay: formatTimeIST(existingRecord.checkInTime),
+            checkOutTimeDisplay: formatTimeIST(existingRecord.checkOutTime),
           });
         } else if (!isHoliday) {
           // User is absent for this date - create absent record
@@ -266,6 +273,9 @@ exports.getDailyAttendance = async (req, res) => {
             overtimeHours: overtimeHours,
             createdAt: null,
             updatedAt: null,
+            dateDisplay: formatDateIST(date),
+            checkInTimeDisplay: null,
+            checkOutTimeDisplay: null,
           });
         }
         // If isHoliday is true and no existingRecord, we skip creating any record

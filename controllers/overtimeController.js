@@ -1,5 +1,6 @@
 // controllers/overtimeController.js
 const Overtime = require('../models/Overtime');
+const { toISTMidnight, formatDateIST } = require('../utils/istDate');
 
 // @desc    Get all overtime records (can filter by status)
 // @route   GET /api/v1/overtime
@@ -14,7 +15,13 @@ exports.getOvertimeRequests = async (req, res) => {
     const records = await Overtime.find(query)
       .populate('user', 'name userId role'); // We need 'role' to filter on the frontend
 
-    res.status(200).json({ success: true, count: records.length, data: records });
+    const withDisplay = records.map((r) => {
+      const obj = r.toObject();
+      obj.dateDisplay = formatDateIST(r.date);
+      return obj;
+    });
+
+    res.status(200).json({ success: true, count: records.length, data: withDisplay });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server Error' });
   }
@@ -91,13 +98,10 @@ exports.createOvertimeRequest = async (req, res) => {
       console.log('   Using authenticated user ID:', targetUserId);
     }
 
-    // Parse date if it's a string
-    let dateObj = date;
-    if (typeof date === 'string') {
-      dateObj = new Date(date);
-      if (isNaN(dateObj.getTime())) {
-        return res.status(400).json({ success: false, message: 'Invalid date format' });
-      }
+    // Pin to that calendar day's IST midnight - see utils/istDate.js for why.
+    const dateObj = toISTMidnight(date);
+    if (!dateObj) {
+      return res.status(400).json({ success: false, message: 'Invalid date format' });
     }
 
     const record = await Overtime.create({
@@ -112,8 +116,11 @@ exports.createOvertimeRequest = async (req, res) => {
 
     // Populate user info in response
     await record.populate('user', 'name userId role');
-    
-    res.status(201).json({ success: true, data: record });
+
+    const recordObj = record.toObject();
+    recordObj.dateDisplay = formatDateIST(record.date);
+
+    res.status(201).json({ success: true, data: recordObj });
   } catch (err) {
     console.error('   ❌ Error creating overtime record:', err);
     if (err.name === 'ValidationError') {

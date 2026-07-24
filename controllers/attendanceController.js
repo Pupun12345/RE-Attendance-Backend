@@ -618,231 +618,6 @@ exports.supervisorCheckOutWorker = async (req, res) => {
   }
 };
 
-// ==========================================
-// 3. SUPERVISOR PENDING SYNC: CHECK-IN (3rd API - Offline Sync)
-// ==========================================
-exports.supervisorCreatePendingCheckIn = async (req, res) => {
-  const { workerId, location, dateTime } = req.body;
-
-  if (!workerId || !req.file) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Worker ID and Photo are required" });
-  }
-
-  try {
-    // Use the timestamp passed from the app (when photo was taken offline)
-    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
-    const attendanceDateIST = getStartOfDayIST(attendanceDate);
-
-    const today = getTodayIST();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    let existRecord = await Attendance.findOne({
-      user: req.user.id,
-      date: { $gte: today, $lt: tomorrow },
-    }).sort({ checkInTime: -1 });
-
-    if (existRecord) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "You already have an attendance record for today. Please wait for admin approval or contact support.",
-      });
-    }
-
-    const record = await Attendance.create({
-      user: workerId,
-      date: attendanceDateIST,
-      status: "pending", // IMPORTANT: Goes to Admin Pending Queue
-      checkInTime: attendanceDate,
-      checkInLocation: parseLocation(location, req.body),
-      checkInSelfie: req.file.path,
-      notes: `Offline Sync by Supervisor: ${req.user.name}`,
-    });
-
-    res.status(201).json({ success: true, data: record });
-  } catch (err) {
-    console.error("Supervisor Pending Check-In Error:", err.message);
-    res
-      .status(500)
-      .json({ success: false, message: "Server Error saving pending record" });
-  }
-};
-
-// ==========================================
-// 4. SUPERVISOR PENDING SYNC: CHECK-OUT (3rd API - Offline Sync)
-// ==========================================
-exports.supervisorCreatePendingCheckOut = async (req, res) => {
-  const { workerId, location, dateTime } = req.body;
-
-  if (!workerId || !req.file) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Worker ID and Photo are required" });
-  }
-
-  try {
-    const attendanceDate = dateTime ? new Date(dateTime) : getTodayIST();
-
-    const startOfDay = getStartOfDayIST(attendanceDate);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-
-    // Try to find existing record for that day
-    let record = await Attendance.findOne({
-      user: workerId,
-      date: { $gte: startOfDay, $lt: endOfDay },
-    });
-
-    if (record && record.checkOutTime) {
-      return res.status(400).json({
-        success: false,
-        message: `You already have a check-out record for today. Please wait for admin approval or contact support.`,
-      });
-    }
-
-    if (record) {
-      // Existing record update, set status to pending for approval
-      record.checkOutTime = attendanceDate;
-      record.checkOutLocation = parseLocation(location, req.body);
-      record.checkOutSelfie = req.file.path;
-      record.status = "pending";
-      record.notes =
-        (record.notes || "") + ` | Offline Out Sync by ${req.user.name}`;
-      await record.save();
-    } else {
-      // No check-in found (maybe check-in was also offline and not synced yet?)
-      record = await Attendance.create({
-        user: workerId,
-        date: startOfDay,
-        status: "pending",
-        checkOutTime: attendanceDate,
-        checkOutLocation: parseLocation(location, req.body),
-        checkOutSelfie: req.file.path,
-        notes: `Offline Out (No CheckIn Found) by Supervisor: ${req.user.name}`,
-      });
-    }
-
-    res.status(201).json({ success: true, data: record });
-  } catch (err) {
-    console.error("Supervisor Pending Check-Out Error:", err.message);
-    res
-      .status(500)
-      .json({ success: false, message: "Server Error saving pending record" });
-  }
-};
-
-// 5. SELF ATTENDANCE: OFFLINE SYNC (PENDING)
-// This saves the record as 'pending' so Admin must approve it.
-exports.selfCreatePendingCheckIn = async (req, res) => {
-  const { dateTime, location } = req.body;
-
-  // Note: For self-attendance, req.user.id comes from the token
-  if (!req.file)
-    return res
-      .status(400)
-      .json({ success: false, message: "Selfie is required" });
-
-  try {
-    // Use the time provided by the app (when the photo was actually taken)
-    const attendanceDate = dateTime ? new Date(dateTime) : new Date();
-    const attendanceDateIST = getStartOfDayIST(attendanceDate);
-
-    const today = getTodayIST();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    let existRecord = await Attendance.findOne({
-      user: req.user.id,
-      date: { $gte: today, $lt: tomorrow },
-    }).sort({ checkInTime: -1 });
-
-    if (existRecord) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "You already have an attendance record for today. Please wait for admin approval or contact support.",
-      });
-    }
-
-    const record = await Attendance.create({
-      user: req.user.id,
-      date: attendanceDateIST,
-      status: "pending", // <--- Goes to Admin Queue
-      checkInTime: attendanceDate,
-      checkInLocation: parseLocation(location, req.body),
-      checkInSelfie: req.file.path,
-      notes: `Offline Self-Sync: ${req.user.name}`,
-    });
-
-    res.status(201).json({ success: true, data: record });
-  } catch (err) {
-    console.error("Self Pending Check-In Error:", err.message);
-    res
-      .status(500)
-      .json({ success: false, message: "Server Error saving pending record" });
-  }
-};
-
-// 6. SELF ATTENDANCE: OFFLINE CHECK-OUT SYNC (PENDING)
-exports.selfCreatePendingCheckOut = async (req, res) => {
-  const { dateTime, location } = req.body;
-  if (!req.file)
-    return res
-      .status(400)
-      .json({ success: false, message: "Selfie is required" });
-
-  try {
-    const attendanceDate = dateTime ? new Date(dateTime) : getTodayIST();
-
-    // Find today's record
-    const startOfDay = getStartOfDayIST(attendanceDate);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setDate(endOfDay.getDate() + 1);
-
-    let record = await Attendance.findOne({
-      user: req.user.id,
-      date: { $gte: startOfDay, $lt: endOfDay },
-    });
-
-    if (record && record.checkOutTime) {
-      return res.status(400).json({
-        success: false,
-        message: `You already have a check-out record for today. Please wait for admin approval or contact support.`,
-      });
-    }
-
-    if (record) {
-      record.checkOutTime = attendanceDate;
-      record.checkOutLocation = parseLocation(location, req.body);
-      record.checkOutSelfie = req.file.path;
-      record.status = "pending"; // Set to pending for Admin review
-      record.notes = (record.notes || "") + ` | Offline Self-Out Sync`;
-      await record.save();
-    } else {
-      // Create new if no check-in found
-      record = await Attendance.create({
-        user: req.user.id,
-        date: startOfDay,
-        status: "pending",
-        checkOutTime: attendanceDate,
-        checkOutLocation: parseLocation(location, req.body),
-        checkOutSelfie: req.file.path,
-        notes: `Offline Self-Out (No CheckIn found)`,
-      });
-    }
-
-    res.status(201).json({ success: true, data: record });
-  } catch (err) {
-    console.error("Self Pending Check-Out Error:", err.message);
-    res
-      .status(500)
-      .json({ success: false, message: "Server Error saving pending record" });
-  }
-};
-
 exports.selfCheckIn = async (req, res) => {
   const { location } = req.body;
   if (!req.file)
@@ -986,92 +761,35 @@ exports.getTodaySummary = async (req, res) => {
 
     // These are independent of each other - run them in parallel instead of
     // serially awaiting each one.
-    const [presentStats, leaveCount, rejectedCount, pendingCount, totalStaff] =
-      await Promise.all([
-        Attendance.aggregate([
-          { $match: { date: { $gte: today, $lt: tomorrow } } },
-          {
-            $group: {
-              _id: "$user",
-              status: { $first: "$status" },
-            },
+    const [presentStats, leaveCount, totalStaff] = await Promise.all([
+      Attendance.aggregate([
+        { $match: { date: { $gte: today, $lt: tomorrow } } },
+        {
+          $group: {
+            _id: "$user",
+            status: { $first: "$status" },
           },
-        ]),
-        Attendance.countDocuments({
-          date: { $gte: today, $lt: tomorrow },
-          status: "leave",
-        }),
-        Attendance.countDocuments({
-          date: { $gte: today, $lt: tomorrow },
-          status: "rejected",
-        }),
-        Attendance.countDocuments({
-          date: { $gte: today, $lt: tomorrow },
-          status: "pending",
-        }),
-        User.countDocuments({
-          role: { $in: ["worker", "supervisor", "management"] },
-          isActive: true,
-        }),
-      ]);
+        },
+      ]),
+      Attendance.countDocuments({
+        date: { $gte: today, $lt: tomorrow },
+        status: "leave",
+      }),
+      User.countDocuments({
+        role: { $in: ["worker", "supervisor", "management"] },
+        isActive: true,
+      }),
+    ]);
 
     const summary = {
       present: presentStats.length,
       absent: Math.max(0, totalStaff - presentStats.length - leaveCount),
       leave: leaveCount,
-      pending: pendingCount,
-      rejected: rejectedCount,
     };
 
     res.status(200).json({ success: true, data: summary });
   } catch (err) {
     console.error("Get Today Summary Error:", err.message);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-exports.getPendingAttendance = async (req, res) => {
-  try {
-    const records = await Attendance.find({ status: "pending" }).populate(
-      "user",
-      "name userId profileImageUrl",
-    );
-    res
-      .status(200)
-      .json({ success: true, count: records.length, data: records });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-exports.approveAttendance = async (req, res) => {
-  try {
-    const record = await Attendance.findById(req.params.id);
-    if (!record)
-      return res
-        .status(404)
-        .json({ success: false, message: "Record not found" });
-
-    record.status = "present";
-    await record.save();
-    res.status(200).json({ success: true, data: record });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-exports.rejectAttendance = async (req, res) => {
-  try {
-    const record = await Attendance.findById(req.params.id);
-    if (!record)
-      return res
-        .status(404)
-        .json({ success: false, message: "Record not found" });
-
-    record.status = "rejected";
-    await record.save();
-    res.status(200).json({ success: true, data: record });
-  } catch (err) {
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };

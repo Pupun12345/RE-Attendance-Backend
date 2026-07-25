@@ -64,10 +64,35 @@ function getTodayIST() {
   return toISTMidnight(getDateOnlyStringIST(new Date()));
 }
 
+const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+
+// 0 = Sunday ... 6 = Saturday, for the IST calendar day a moment falls on.
+function getDayOfWeekIST(date) {
+  const dateStr = getDateOnlyStringIST(date);
+  if (!dateStr) return null;
+  // toISTMidnight gives a real instant at IST midnight; reading it back
+  // through the IST-shift trick above gives the correct IST weekday
+  // regardless of what timezone this process itself is running in.
+  const shifted = new Date(toISTMidnight(dateStr).getTime() + IST_OFFSET_MS);
+  return shifted.getUTCDay();
+}
+
+function isSundayIST(date) {
+  return getDayOfWeekIST(date) === 0;
+}
+
+function getDayNameIST(date) {
+  const dow = getDayOfWeekIST(date);
+  return dow === null ? null : DAY_NAMES[dow];
+}
+
 module.exports = {
   toISTMidnight,
   getDateOnlyStringIST,
   formatDateIST,
   formatTimeIST,
   getTodayIST,
+  getDayOfWeekIST,
+  isSundayIST,
+  getDayNameIST,
 };

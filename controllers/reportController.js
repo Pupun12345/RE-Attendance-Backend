@@ -4,7 +4,7 @@ const Complaint = require("../models/Complaint");
 const Overtime = require("../models/Overtime");
 const User = require("../models/User");
 const Holiday = require("../models/Holiday");
-const { formatDateIST, formatTimeIST } = require("../utils/istDate");
+const { formatDateIST, formatTimeIST, isSundayIST, getDayNameIST } = require("../utils/istDate");
 
 // Helper function to get date-only string (YYYY-MM-DD) from a date object
 // Normalizes to IST timezone for consistent date comparison
@@ -216,6 +216,11 @@ exports.getDailyAttendance = async (req, res) => {
               }
             : null;
 
+          const recordIsSunday = isSundayIST(existingRecord.date);
+          const recordIsPresent = ["present", "late"].includes(
+            (existingRecord.status || "").toLowerCase(),
+          );
+
           allRecords.push({
             ...existingRecord,
             user: {
@@ -241,6 +246,9 @@ exports.getDailyAttendance = async (req, res) => {
             dateDisplay: formatDateIST(existingRecord.date),
             checkInTimeDisplay: formatTimeIST(existingRecord.checkInTime),
             checkOutTimeDisplay: formatTimeIST(existingRecord.checkOutTime),
+            dayName: getDayNameIST(existingRecord.date),
+            isSunday: recordIsSunday,
+            sundayWorked: recordIsSunday && recordIsPresent,
           });
         } else if (!isHoliday) {
           // User is absent for this date - create absent record
@@ -276,6 +284,9 @@ exports.getDailyAttendance = async (req, res) => {
             dateDisplay: formatDateIST(date),
             checkInTimeDisplay: null,
             checkOutTimeDisplay: null,
+            dayName: getDayNameIST(date),
+            isSunday: isSundayIST(date),
+            sundayWorked: false,
           });
         }
         // If isHoliday is true and no existingRecord, we skip creating any record
@@ -487,10 +498,48 @@ exports.getMonthlySummary = async (req, res) => {
       },
     ]);
 
-    // Fetch overtime records for the date range (include pending and approved)
+    // Count, per user, how many Sundays in the range they actually worked
+    // (checked in as present/late) - shown as its own column since Sunday
+    // attendance is worth calling out separately from a normal working day.
+    const sundayWorkedAgg = await Attendance.aggregate([
+      {
+        $match: {
+          date: { $gte: start, $lte: end },
+          status: { $in: ["present", "late"] },
+        },
+      },
+      // Dedup per user per day first, same as the main summary above.
+      {
+        $group: {
+          _id: { user: "$user", date: "$date" },
+        },
+      },
+      {
+        $addFields: {
+          dayOfWeek: {
+            $dayOfWeek: { date: "$_id.date", timezone: "Asia/Kolkata" },
+          },
+        },
+      },
+      // Mongo's $dayOfWeek: 1 = Sunday
+      { $match: { dayOfWeek: 1 } },
+      {
+        $group: {
+          _id: "$_id.user",
+          sundayWorkedDays: { $sum: 1 },
+        },
+      },
+    ]);
+    const sundayWorkedMap = new Map(
+      sundayWorkedAgg.map((r) => [r._id.toString(), r.sundayWorkedDays]),
+    );
+
+    // Only approved overtime counts toward the report — it should show up
+    // for its date the moment it's approved, not before (pending/rejected
+    // requests must not inflate the hours shown here).
     const overtimeRecords = await Overtime.find({
       date: { $gte: start, $lte: end },
-      status: { $in: ["pending", "approved"] },
+      status: "approved",
     }).lean();
 
     // Calculate total overtime hours per user
@@ -537,6 +586,7 @@ exports.getMonthlySummary = async (req, res) => {
         ot: totalOvertimeHours, // Rounded to whole number
         overtime: totalOvertimeHours, // Rounded to whole number
         overtimeHours: totalOvertimeHours, // Rounded to whole number
+        sundayWorkedDays: sundayWorkedMap.get(userId) || 0,
       };
     });
 
@@ -567,6 +617,7 @@ exports.getMonthlySummary = async (req, res) => {
             ot: userOvertimeHours, // Rounded to whole number
             overtime: userOvertimeHours, // Rounded to whole number
             overtimeHours: userOvertimeHours, // Rounded to whole number
+            sundayWorkedDays: sundayWorkedMap.get(userId) || 0,
           };
         }
         return null;
@@ -615,6 +666,7 @@ exports.getMonthlySummary = async (req, res) => {
         ot: 0,
         overtime: 0,
         overtimeHours: 0,
+        sundayWorkedDays: 0,
       }));
 
     summaryWithOvertime.push(...usersWithNoRecords);

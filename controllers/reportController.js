@@ -4,7 +4,13 @@ const Complaint = require("../models/Complaint");
 const Overtime = require("../models/Overtime");
 const User = require("../models/User");
 const Holiday = require("../models/Holiday");
-const { formatDateIST, formatTimeIST, isSundayIST, getDayNameIST } = require("../utils/istDate");
+const {
+  formatDateIST,
+  formatTimeIST,
+  isSundayIST,
+  getDayNameIST,
+  getDateOnlyStringIST,
+} = require("../utils/istDate");
 
 // Helper function to get date-only string (YYYY-MM-DD) from a date object
 // Normalizes to IST timezone for consistent date comparison
@@ -676,6 +682,172 @@ exports.getMonthlySummary = async (req, res) => {
       count: summaryWithOvertime.length,
       holidaysCount: holidaysCount,
       data: summaryWithOvertime,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+// @desc    Month grid report: one row per user, one cell per day of the month
+// @route   GET /api/v1/reports/attendance/month-matrix?month=5&year=2026
+// Cell codes: P = present, A = absent, L = leave, WO = week off (Sunday),
+// H = holiday. Sundays and holidays are week-offs, not absences.
+exports.getMonthMatrix = async (req, res) => {
+  const month = parseInt(req.query.month, 10);
+  const year = parseInt(req.query.year, 10);
+
+  if (!month || !year || month < 1 || month > 12) {
+    return res.status(400).json({
+      success: false,
+      message: "Valid month (1-12) and year are required",
+    });
+  }
+
+  const monthStr = String(month).padStart(2, "0");
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const startDateStr = `${year}-${monthStr}-01`;
+  const endDateStr = `${year}-${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
+
+  const start = new Date(`${startDateStr}T00:00:00.000+05:30`);
+  const end = new Date(`${endDateStr}T23:59:59.999+05:30`);
+
+  try {
+    const userQuery = { isActive: true };
+    if (req.user.role === "supervisor") {
+      userQuery._id = req.user._id;
+    } else {
+      userQuery.role = { $in: ["worker", "supervisor", "management"] };
+    }
+
+    const allUsers = await User.find(
+      userQuery,
+      "name userId role designation",
+    ).lean();
+
+    // Order the same way the rest of the reports do: management, then
+    // supervisors, then workers, alphabetical within each group.
+    const rolePriority = (role) => {
+      const r = (role || "").toUpperCase();
+      if (r.includes("MANAGEMENT")) return 1;
+      if (r.includes("SUPERVISOR")) return 2;
+      if (r.includes("WORKER")) return 3;
+      return 4;
+    };
+    allUsers.sort((a, b) => {
+      const diff = rolePriority(a.role) - rolePriority(b.role);
+      if (diff !== 0) return diff;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+
+    const [attendanceRecords, holidays, overtimeRecords] = await Promise.all([
+      Attendance.find({ date: { $gte: start, $lte: end } })
+        .select("user date status")
+        .lean(),
+      Holiday.find({ date: { $gte: start, $lte: end } }).lean(),
+      // Only approved overtime is reported - see getMonthlySummary.
+      Overtime.find({
+        date: { $gte: start, $lte: end },
+        status: "approved",
+      }).lean(),
+    ]);
+
+    const holidayDateSet = new Set();
+    holidays.forEach((h) => {
+      const dateStr = getDateOnlyStringIST(h.date);
+      if (dateStr && dateStr >= startDateStr && dateStr <= endDateStr) {
+        holidayDateSet.add(dateStr);
+      }
+    });
+
+    // user_date -> status
+    const attendanceMap = new Map();
+    attendanceRecords.forEach((r) => {
+      const userId = r.user?.toString() || r.user;
+      const dateStr = getDateOnlyStringIST(r.date);
+      if (!userId || !dateStr) return;
+      attendanceMap.set(`${userId}_${dateStr}`, (r.status || "").toLowerCase());
+    });
+
+    // user -> total approved OT hours in the month
+    const overtimeMap = new Map();
+    overtimeRecords.forEach((ot) => {
+      const userId = ot.user?.toString() || ot.user;
+      if (!userId) return;
+      overtimeMap.set(userId, (overtimeMap.get(userId) || 0) + (ot.hours || 0));
+    });
+
+    // Build the day column definitions once - every row shares them.
+    const days = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${monthStr}-${String(d).padStart(2, "0")}`;
+      days.push({
+        day: d,
+        date: dateStr,
+        dayName: getDayNameIST(dateStr),
+        dayShort: getDayNameIST(dateStr).slice(0, 3),
+        isSunday: isSundayIST(dateStr),
+        isHoliday: holidayDateSet.has(dateStr),
+      });
+    }
+
+    const weekOffCount = days.filter((d) => d.isSunday || d.isHoliday).length;
+    const workingDaysCount = daysInMonth - weekOffCount;
+
+    const rows = allUsers.map((user) => {
+      const userId = user._id.toString();
+      let present = 0;
+      let absent = 0;
+      let leave = 0;
+      let sundayWorked = 0;
+
+      const cells = days.map((d) => {
+        const status = attendanceMap.get(`${userId}_${d.date}`);
+        const isWeekOff = d.isSunday || d.isHoliday;
+
+        if (status === "present" || status === "late") {
+          present++;
+          if (d.isSunday) sundayWorked++;
+          // Worked on a week-off day - show it as worked, not as WO.
+          return "P";
+        }
+        if (status === "leave") {
+          leave++;
+          return "L";
+        }
+        if (isWeekOff) return d.isHoliday && !d.isSunday ? "H" : "WO";
+        absent++;
+        return "A";
+      });
+
+      return {
+        user: {
+          userId: user.userId,
+          name: user.name,
+          role: user.role,
+          designation: user.designation || user.role || null,
+        },
+        cells,
+        totalPresent: present,
+        totalAbsent: absent,
+        totalLeave: leave,
+        totalWeekOff: weekOffCount,
+        sundayWorkedDays: sundayWorked,
+        overtimeHours: Math.round(overtimeMap.get(userId) || 0),
+        workingDays: workingDaysCount,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      month,
+      year,
+      daysInMonth,
+      workingDays: workingDaysCount,
+      holidaysCount: holidayDateSet.size,
+      days,
+      count: rows.length,
+      data: rows,
     });
   } catch (err) {
     console.error(err);

@@ -3,6 +3,7 @@ const express = require('express');
 const {
   getDailyAttendance,
   getMonthlySummary,
+  getMonthMatrix,
   getComplaintReport
 } = require('../controllers/reportController');
 const { protect, authorize } = require('../middleware/auth');
@@ -17,6 +18,7 @@ router.get('/attendance/daily', authorize('admin', 'management', 'supervisor'), 
 // Monthly summary and complaints: only admin and management
 router.use(authorize('admin', 'management'));
 router.get('/attendance/monthly', getMonthlySummary);
+router.get('/attendance/month-matrix', getMonthMatrix);
 router.get('/complaints', getComplaintReport);
 
 module.exports = router;

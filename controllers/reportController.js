@@ -792,7 +792,10 @@ exports.getMonthMatrix = async (req, res) => {
     }
 
     const weekOffCount = days.filter((d) => d.isSunday || d.isHoliday).length;
-    const workingDaysCount = daysInMonth - weekOffCount;
+    // Baseline for someone who worked no week-offs at all. Anyone who did
+    // work a Sunday or a holiday gets those days added back on below, so
+    // working days is per-person rather than one number for everybody.
+    const baseWorkingDays = daysInMonth - weekOffCount;
 
     const rows = allUsers.map((user) => {
       const userId = user._id.toString();
@@ -800,6 +803,7 @@ exports.getMonthMatrix = async (req, res) => {
       let absent = 0;
       let leave = 0;
       let sundayWorked = 0;
+      let weekOffWorked = 0;
 
       const cells = days.map((d) => {
         const status = attendanceMap.get(`${userId}_${d.date}`);
@@ -808,6 +812,7 @@ exports.getMonthMatrix = async (req, res) => {
         if (status === "present" || status === "late") {
           present++;
           if (d.isSunday) sundayWorked++;
+          if (isWeekOff) weekOffWorked++;
           // Worked on a week-off day - show it as worked, not as WO.
           return "P";
         }
@@ -834,7 +839,7 @@ exports.getMonthMatrix = async (req, res) => {
         totalWeekOff: weekOffCount,
         sundayWorkedDays: sundayWorked,
         overtimeHours: Math.round(overtimeMap.get(userId) || 0),
-        workingDays: workingDaysCount,
+        workingDays: baseWorkingDays + weekOffWorked,
       };
     });
 
@@ -843,7 +848,7 @@ exports.getMonthMatrix = async (req, res) => {
       month,
       year,
       daysInMonth,
-      workingDays: workingDaysCount,
+      workingDays: baseWorkingDays,
       holidaysCount: holidayDateSet.size,
       days,
       count: rows.length,
